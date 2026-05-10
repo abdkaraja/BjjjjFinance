@@ -28,6 +28,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IRefundService, RefundService>();
         services.AddScoped<ICashSettlementService, CashSettlementService>();
         services.AddScoped<IVatReportService, VatReportService>();
+        services.AddScoped<IFraudDetectionService, FraudDetectionService>();
 
         // Background service: auto-settles pending earnings after 15-minute window
         services.AddHostedService<PendingEarningsSettlementService>();
@@ -78,6 +79,8 @@ public static class ServiceCollectionExtensions
             options.AddPolicy("VpFinance",         p => p.RequireRole("VpFinance", "Cfo", "SuperAdmin"));
             options.AddPolicy("SuperAdmin",        p => p.RequireRole("SuperAdmin"));
             options.AddPolicy("SupportAgent",      p => p.RequireRole("SupportAgent", "FinanceAdmin", "SuperAdmin"));
+            options.AddPolicy("FraudTeam",         p => p.RequireRole("FraudOfficer", "FraudManager", "FinanceAdmin", "SuperAdmin"));
+            options.AddPolicy("FraudManager",      p => p.RequireRole("FraudManager", "FinanceAdmin", "SuperAdmin"));
             options.AddPolicy("CorporateManager",  p => p.RequireRole("CorporateAccountManager", "FinanceAdmin", "SuperAdmin"));
             options.AddPolicy("DriverOrDelivery",  p => p.RequireRole("Driver", "Delivery"));
             options.AddPolicy("User",              p => p.RequireRole("User"));

@@ -234,6 +234,50 @@ public class CashSettlementConfiguration : IEntityTypeConfiguration<CashSettleme
     }
 }
 
+public class FraudRuleConfiguration : IEntityTypeConfiguration<FraudRule>
+{
+    public void Configure(EntityTypeBuilder<FraudRule> builder)
+    {
+        builder.ToTable("FraudRules");
+        builder.HasKey(r => r.Id);
+
+        builder.Property(r => r.RuleKey).HasMaxLength(100).IsRequired();
+        builder.Property(r => r.Description).HasMaxLength(500);
+        builder.Property(r => r.Domain).HasMaxLength(50).HasDefaultValue("all");
+        builder.Property(r => r.Threshold).HasPrecision(18, 4);
+        builder.Property(r => r.Severity).HasConversion<string>().HasMaxLength(20);
+        builder.Property(r => r.AutoAction).HasConversion<string>().HasMaxLength(30);
+
+        builder.HasIndex(r => r.RuleKey).IsUnique();
+        builder.HasIndex(r => new { r.Domain, r.IsActive });
+    }
+}
+
+public class FraudCaseConfiguration : IEntityTypeConfiguration<FraudCase>
+{
+    public void Configure(EntityTypeBuilder<FraudCase> builder)
+    {
+        builder.ToTable("FraudCases");
+        builder.HasKey(c => c.Id);
+
+        builder.Property(c => c.RuleKey).HasMaxLength(100).IsRequired();
+        builder.Property(c => c.ActorType).HasConversion<string>().HasMaxLength(20);
+        builder.Property(c => c.TriggerEvent).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(c => c.Severity).HasConversion<string>().HasMaxLength(20);
+        builder.Property(c => c.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(c => c.AutoActionTaken).HasConversion<string>().HasMaxLength(30);
+        builder.Property(c => c.InvestigationNotesJson).HasColumnType("nvarchar(max)").HasDefaultValue("[]");
+        builder.Property(c => c.ResolutionCode).HasConversion<string>().HasMaxLength(30);
+        builder.Property(c => c.ResolutionNotes).HasMaxLength(1000);
+        builder.Property(c => c.RelatedEntityType).HasMaxLength(50);
+
+        builder.HasIndex(c => c.ActorId);
+        builder.HasIndex(c => c.Status);
+        builder.HasIndex(c => c.Severity);
+        builder.HasIndex(c => new { c.Status, c.Severity });
+    }
+}
+
 public class VatReportConfiguration : IEntityTypeConfiguration<VatReport>
 {
     public void Configure(EntityTypeBuilder<VatReport> builder)

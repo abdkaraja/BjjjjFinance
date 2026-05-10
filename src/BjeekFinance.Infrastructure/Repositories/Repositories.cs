@@ -286,6 +286,51 @@ public class CashSettlementRepository : Repository<CashSettlement>, ICashSettlem
     }
 }
 
+// ── Fraud Rule Repository ──────────────────────────────────────────────────────
+
+public class FraudRuleRepository : Repository<FraudRule>, IFraudRuleRepository
+{
+    public FraudRuleRepository(BjeekFinanceDbContext ctx) : base(ctx) { }
+
+    public async Task<IEnumerable<FraudRule>> GetActiveRulesAsync(string? domain = null, CancellationToken ct = default)
+    {
+        var query = _set.Where(r => r.IsActive);
+        if (!string.IsNullOrEmpty(domain) && domain != "all")
+            query = query.Where(r => r.Domain == domain || r.Domain == "all");
+        return await query.ToListAsync(ct);
+    }
+
+    public async Task<FraudRule?> GetByKeyAsync(string ruleKey, CancellationToken ct = default)
+        => await _set.FirstOrDefaultAsync(r => r.RuleKey == ruleKey, ct);
+}
+
+// ── Fraud Case Repository ──────────────────────────────────────────────────────
+
+public class FraudCaseRepository : Repository<FraudCase>, IFraudCaseRepository
+{
+    public FraudCaseRepository(BjeekFinanceDbContext ctx) : base(ctx) { }
+
+    public async Task<IEnumerable<FraudCase>> GetByActorAsync(Guid actorId, CancellationToken ct = default)
+        => await _set.Where(c => c.ActorId == actorId).OrderByDescending(c => c.CreatedAt).ToListAsync(ct);
+
+    public async Task<IEnumerable<FraudCase>> GetByStatusAsync(FraudCaseStatus status, CancellationToken ct = default)
+        => await _set.Where(c => c.Status == status).OrderByDescending(c => c.CreatedAt).ToListAsync(ct);
+
+    public async Task<IEnumerable<FraudCase>> GetBySeverityAsync(FraudSeverity severity, CancellationToken ct = default)
+        => await _set.Where(c => c.Severity == severity).OrderByDescending(c => c.CreatedAt).ToListAsync(ct);
+
+    public async Task<IEnumerable<FraudCase>> GetOpenBySeverityAsync(FraudSeverity minSeverity, CancellationToken ct = default)
+    {
+        var severities = new[] { FraudSeverity.High, FraudSeverity.Critical };
+        if (minSeverity == FraudSeverity.Medium)
+            severities = new[] { FraudSeverity.Medium, FraudSeverity.High, FraudSeverity.Critical };
+        if (minSeverity == FraudSeverity.Low)
+            severities = new[] { FraudSeverity.Low, FraudSeverity.Medium, FraudSeverity.High, FraudSeverity.Critical };
+        return await _set.Where(c => c.Status == FraudCaseStatus.Open && severities.Contains(c.Severity))
+            .OrderByDescending(c => c.Severity).ThenByDescending(c => c.CreatedAt).ToListAsync(ct);
+    }
+}
+
 // ── Vat Report Repository ──────────────────────────────────────────────────────
 
 public class VatReportRepository : Repository<VatReport>, IVatReportRepository
@@ -388,6 +433,8 @@ public class UnitOfWork : IUnitOfWork
     public ICashSettlementRepository CashSettlements { get; }
     public IReconciliationReportRepository ReconciliationReports { get; }
     public IVatReportRepository VatReports { get; }
+    public IFraudRuleRepository FraudRules { get; }
+    public IFraudCaseRepository FraudCases { get; }
     public IFinanceParameterRepository FinanceParameters { get; }
 
     public UnitOfWork(BjeekFinanceDbContext ctx)
@@ -404,6 +451,8 @@ public class UnitOfWork : IUnitOfWork
         CashSettlements = new CashSettlementRepository(ctx);
         ReconciliationReports = new ReconciliationReportRepository(ctx);
         VatReports = new VatReportRepository(ctx);
+        FraudRules = new FraudRuleRepository(ctx);
+        FraudCases = new FraudCaseRepository(ctx);
         FinanceParameters = new FinanceParameterRepository(ctx);
     }
 

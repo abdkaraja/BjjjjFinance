@@ -158,6 +158,24 @@ public enum FraudCaseStatus
     FalsePositive
 }
 
+public enum FraudAutoAction
+{
+    NotifyOnly,
+    SuspendInstantPay,
+    FreezeWallet
+}
+
+public enum FraudResolutionCode
+{
+    NoActionTaken,
+    DriverRefunded,
+    MerchantAdjusted,
+    AccountSuspended,
+    LegalEscalated,
+    Whitelisted,
+    Other
+}
+
 public enum CashSettlementStatus
 {
     Pending,

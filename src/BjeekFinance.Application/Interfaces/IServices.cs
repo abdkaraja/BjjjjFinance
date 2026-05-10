@@ -314,6 +314,44 @@ public interface IVatReportService
     Task<string> GetVatReportCsvAsync(Guid reportId, CancellationToken ct = default);
 }
 
+// ── Fraud Detection Service (UC-AD-FIN-05) ─────────────────────────────────────
+
+public interface IFraudDetectionService
+{
+    /// <summary>Evaluate an event against active fraud rules. Creates case if triggered.</summary>
+    Task<FraudCaseDto?> EvaluateEventAsync(string ruleKey, Guid actorId, string actorType, string triggerEvent, Guid? relatedEntityId = null, string? relatedEntityType = null, CancellationToken ct = default);
+
+    /// <summary>Manually create a fraud case (admin escalation).</summary>
+    Task<FraudCaseDto> CreateCaseAsync(CreateFraudCaseRequest request, CancellationToken ct = default);
+
+    /// <summary>Assign a fraud case to a team member.</summary>
+    Task<FraudCaseDto> AssignCaseAsync(Guid caseId, AssignFraudCaseRequest request, CancellationToken ct = default);
+
+    /// <summary>Add investigation note to a case.</summary>
+    Task<FraudCaseDto> AddNoteAsync(Guid caseId, AddInvestigationNoteRequest request, CancellationToken ct = default);
+
+    /// <summary>Resolve a fraud case with resolution code.</summary>
+    Task<FraudCaseDto> ResolveCaseAsync(Guid caseId, ResolveFraudCaseRequest request, Guid resolvedByActorId, CancellationToken ct = default);
+
+    /// <summary>Archive a fraud case.</summary>
+    Task<FraudCaseDto> ArchiveCaseAsync(Guid caseId, Guid archivedByActorId, CancellationToken ct = default);
+
+    /// <summary>Get dashboard with open cases grouped by severity.</summary>
+    Task<IEnumerable<FraudCaseDto>> GetOpenCasesAsync(FraudSeverity minSeverity = FraudSeverity.Medium, CancellationToken ct = default);
+
+    /// <summary>Get cases for a specific actor.</summary>
+    Task<IEnumerable<FraudCaseDto>> GetCasesByActorAsync(Guid actorId, CancellationToken ct = default);
+
+    /// <summary>Get fraud case by ID.</summary>
+    Task<FraudCaseDto> GetCaseAsync(Guid caseId, CancellationToken ct = default);
+
+    // ── Rule management ──────────────────────────────────────────────────────
+
+    Task<IEnumerable<FraudRuleDto>> GetActiveRulesAsync(string? domain = null, CancellationToken ct = default);
+    Task<FraudRuleDto> UpdateRuleAsync(string ruleKey, UpdateFraudRuleRequest request, CancellationToken ct = default);
+    Task<FraudRuleDto> GetRuleAsync(string ruleKey, CancellationToken ct = default);
+}
+
 // ── KYC / Payout Account Service ──────────────────────────────────────────────
 
 public interface IKycService

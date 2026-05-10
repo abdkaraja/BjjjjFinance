@@ -121,6 +121,20 @@ public interface IRefundRepository : IRepository<Refund>
     Task<decimal> GetTotalRefundedAmountAsync(Guid originalTransactionId, CancellationToken ct = default);
 }
 
+public interface IFraudRuleRepository : IRepository<FraudRule>
+{
+    Task<IEnumerable<FraudRule>> GetActiveRulesAsync(string? domain = null, CancellationToken ct = default);
+    Task<FraudRule?> GetByKeyAsync(string ruleKey, CancellationToken ct = default);
+}
+
+public interface IFraudCaseRepository : IRepository<FraudCase>
+{
+    Task<IEnumerable<FraudCase>> GetByActorAsync(Guid actorId, CancellationToken ct = default);
+    Task<IEnumerable<FraudCase>> GetByStatusAsync(FraudCaseStatus status, CancellationToken ct = default);
+    Task<IEnumerable<FraudCase>> GetBySeverityAsync(FraudSeverity severity, CancellationToken ct = default);
+    Task<IEnumerable<FraudCase>> GetOpenBySeverityAsync(FraudSeverity minSeverity, CancellationToken ct = default);
+}
+
 public interface IVatReportRepository : IRepository<VatReport>
 {
     Task<IEnumerable<VatReport>> GetByPeriodAsync(DateTime from, DateTime to, Guid? merchantActorId = null, CancellationToken ct = default);
@@ -161,6 +175,8 @@ public interface IUnitOfWork : IAsyncDisposable
     ICashSettlementRepository CashSettlements { get; }
     IReconciliationReportRepository ReconciliationReports { get; }
     IVatReportRepository VatReports { get; }
+    IFraudRuleRepository FraudRules { get; }
+    IFraudCaseRepository FraudCases { get; }
     IFinanceParameterRepository FinanceParameters { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);

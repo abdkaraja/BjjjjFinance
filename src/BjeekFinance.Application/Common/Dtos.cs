@@ -608,6 +608,74 @@ public record EscalateSettlementRequest(
     string Notes
 );
 
+// ── UC-AD-FIN-05: Fraud Detection ──────────────────────────────────────────────
+
+public record FraudRuleDto(
+    Guid RuleId,
+    string RuleKey,
+    string Description,
+    string Domain,
+    decimal Threshold,
+    FraudSeverity Severity,
+    FraudAutoAction AutoAction,
+    int? WindowHours,
+    bool IsActive
+);
+
+public record FraudCaseDto(
+    Guid CaseId,
+    string RuleKey,
+    Guid ActorId,
+    string ActorType,
+    string TriggerEvent,
+    FraudSeverity Severity,
+    FraudCaseStatus Status,
+    FraudAutoAction AutoActionTaken,
+    Guid? AssignedToActorId,
+    string InvestigationNotesJson,
+    FraudResolutionCode? ResolutionCode,
+    string? ResolutionNotes,
+    bool Whitelisted,
+    Guid? RelatedEntityId,
+    string? RelatedEntityType,
+    DateTime? ResolvedAt,
+    DateTime? ArchivedAt,
+    DateTime CreatedAt
+);
+
+public record CreateFraudCaseRequest(
+    string RuleKey,
+    Guid ActorId,
+    string ActorType,
+    string TriggerEvent,
+    FraudSeverity Severity,
+    Guid? RelatedEntityId = null,
+    string? RelatedEntityType = null
+);
+
+public record AssignFraudCaseRequest(
+    Guid AssignedToActorId
+);
+
+public record AddInvestigationNoteRequest(
+    string Note,
+    Guid ActorId
+);
+
+public record ResolveFraudCaseRequest(
+    FraudResolutionCode ResolutionCode,
+    string ResolutionNotes,
+    bool Whitelist = false
+);
+
+public record UpdateFraudRuleRequest(
+    decimal? Threshold,
+    FraudSeverity? Severity,
+    FraudAutoAction? AutoAction,
+    bool? IsActive,
+    Guid ChangedByActorId
+);
+
 // ── UC-AD-FIN-04: VAT Report ───────────────────────────────────────────────────
 
 public record VatReportLineDto(

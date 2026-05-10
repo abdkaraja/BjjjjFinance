@@ -438,6 +438,89 @@ public partial class InitialCreate : Migration
         migrationBuilder.CreateIndex("IX_VatReports_DateRange_Merchant", "VatReports", new[] { "PeriodStart", "PeriodEnd", "MerchantActorId" });
         migrationBuilder.CreateIndex("IX_VatReports_GeneratedAt", "VatReports", "GeneratedAt");
 
+        // ── FraudRules (UC-AD-FIN-05) ──────────────────────────────────────────
+        migrationBuilder.CreateTable(
+            name: "FraudRules",
+            columns: table => new
+            {
+                Id = table.Column<Guid>(nullable: false),
+                RuleKey = table.Column<string>(maxLength: 100, nullable: false),
+                Description = table.Column<string>(maxLength: 500, nullable: false),
+                Domain = table.Column<string>(maxLength: 50, nullable: false, defaultValue: "all"),
+                Threshold = table.Column<decimal>(type: "decimal(18,4)", nullable: false),
+                Severity = table.Column<string>(maxLength: 20, nullable: false),
+                AutoAction = table.Column<string>(maxLength: 30, nullable: false),
+                WindowHours = table.Column<int>(nullable: true),
+                IsActive = table.Column<bool>(nullable: false, defaultValue: true),
+                ChangedByActorId = table.Column<Guid>(nullable: false),
+                DeactivatedAt = table.Column<DateTime>(nullable: true),
+                CreatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()"),
+                UpdatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()")
+            },
+            constraints: table => table.PrimaryKey("PK_FraudRules", x => x.Id));
+        migrationBuilder.CreateIndex("IX_FraudRules_RuleKey", "FraudRules", "RuleKey", unique: true);
+        migrationBuilder.CreateIndex("IX_FraudRules_Domain_Active", "FraudRules", new[] { "Domain", "IsActive" });
+
+        // ── FraudCases (UC-AD-FIN-05) ──────────────────────────────────────────
+        migrationBuilder.CreateTable(
+            name: "FraudCases",
+            columns: table => new
+            {
+                Id = table.Column<Guid>(nullable: false),
+                RuleKey = table.Column<string>(maxLength: 100, nullable: false),
+                ActorId = table.Column<Guid>(nullable: false),
+                ActorType = table.Column<string>(maxLength: 20, nullable: false),
+                TriggerEvent = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                Severity = table.Column<string>(maxLength: 20, nullable: false),
+                Status = table.Column<string>(maxLength: 20, nullable: false),
+                AutoActionTaken = table.Column<string>(maxLength: 30, nullable: false),
+                AssignedToActorId = table.Column<Guid>(nullable: true),
+                InvestigationNotesJson = table.Column<string>(type: "nvarchar(max)", nullable: false, defaultValue: "[]"),
+                ResolutionCode = table.Column<string>(maxLength: 30, nullable: true),
+                ResolutionNotes = table.Column<string>(maxLength: 1000, nullable: true),
+                Whitelisted = table.Column<bool>(nullable: false, defaultValue: false),
+                RelatedEntityId = table.Column<Guid>(nullable: true),
+                RelatedEntityType = table.Column<string>(maxLength: 50, nullable: true),
+                ResolvedAt = table.Column<DateTime>(nullable: true),
+                ResolvedByActorId = table.Column<Guid>(nullable: true),
+                ArchivedAt = table.Column<DateTime>(nullable: true),
+                ArchivedByActorId = table.Column<Guid>(nullable: true),
+                CreatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()"),
+                UpdatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()")
+            },
+            constraints: table => table.PrimaryKey("PK_FraudCases", x => x.Id));
+        migrationBuilder.CreateIndex("IX_FraudCases_ActorId", "FraudCases", "ActorId");
+        migrationBuilder.CreateIndex("IX_FraudCases_Status", "FraudCases", "Status");
+        migrationBuilder.CreateIndex("IX_FraudCases_Severity", "FraudCases", "Severity");
+        migrationBuilder.CreateIndex("IX_FraudCases_Status_Severity", "FraudCases", new[] { "Status", "Severity" });
+
+        // ── Seed default fraud rules ───────────────────────────────────────────
+        var fraudSystemId = Guid.Parse("00000000-0000-0000-0000-000000000001");
+        var fraudSeedNow = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
+        var fraudRules = new[]
+        {
+            ("CASH_VARIANCE_HIGH",     "Cash variance > SAR 20 on single settlement",              "ride",      20m,    "High",    "SuspendInstantPay", "null"),
+            ("BALANCE_LEDGER_MISMATCH","Wallet balance change without corresponding ledger entry",  "wallet",    0m,     "Critical","FreezeWallet",       "null"),
+            ("DRIVER_REFUND_RATE",     "Driver refund request rate > 10% of trips in 7-day window","ride",      10m,    "Medium",  "NotifyOnly",         "168"),
+            ("INSTANT_PAY_NEW_DEST",   "Instant Pay to new destination within 24h of KYC approval","wallet",   24m,    "High",    "SuspendInstantPay", "24"),
+            ("IBAN_DUPLICATE",         "Same IBAN registered across multiple driver accounts",     "wallet",    0m,     "Critical","FreezeWallet",       "null"),
+            ("REPEATED_FAILED_IP",     "Repeated failed Instant Pay attempts from same device",    "wallet",    3m,     "Medium",  "NotifyOnly",         "24"),
+            ("COMMISSION_MISMATCH",    "Commission amount does not match applicable rate",          "ride",      0m,     "High",    "NotifyOnly",         "null"),
+            ("MERCHANT_REFUND_VOLUME", "Merchant refund volume > 15% of order value in 7-day window","delivery",15m,    "Medium",  "NotifyOnly",         "168")
+        };
+        foreach (var (key, desc, domain, threshold, severity, action, window) in fraudRules)
+        {
+            migrationBuilder.InsertData("FraudRules", new[]
+            {
+                "Id", "RuleKey", "Description", "Domain", "Threshold", "Severity", "AutoAction",
+                "WindowHours", "IsActive", "ChangedByActorId", "CreatedAt", "UpdatedAt"
+            }, new object[]
+            {
+                Guid.NewGuid(), key, desc, domain, threshold, severity, action,
+                window == "null" ? null! : int.Parse(window), true, fraudSystemId, fraudSeedNow, fraudSeedNow
+            });
+        }
+
         // ── Seed default finance parameters ────────────────────────────────────
         var systemActorId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var now = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -483,6 +566,8 @@ public partial class InitialCreate : Migration
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.DropTable("FraudCases");
+        migrationBuilder.DropTable("FraudRules");
         migrationBuilder.DropTable("VatReports");
         migrationBuilder.DropTable("ReconciliationReports");
         migrationBuilder.DropTable("CashSettlements");
