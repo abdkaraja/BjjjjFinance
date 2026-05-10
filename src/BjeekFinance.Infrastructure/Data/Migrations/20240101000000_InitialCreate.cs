@@ -411,6 +411,33 @@ public partial class InitialCreate : Migration
         migrationBuilder.CreateIndex("IX_ReconciliationReports_DateRange", "ReconciliationReports", new[] { "DateFrom", "DateTo", "CityId" });
         migrationBuilder.CreateIndex("IX_ReconciliationReports_GeneratedAt", "ReconciliationReports", "GeneratedAt");
 
+        // ── VatReports (UC-AD-FIN-04) ─────────────────────────────────────────
+        migrationBuilder.CreateTable(
+            name: "VatReports",
+            columns: table => new
+            {
+                Id = table.Column<Guid>(nullable: false),
+                PeriodStart = table.Column<DateTime>(nullable: false),
+                PeriodEnd = table.Column<DateTime>(nullable: false),
+                MerchantActorId = table.Column<Guid>(nullable: true),
+                ServiceType = table.Column<string>(maxLength: 50, nullable: true),
+                TotalGross = table.Column<decimal>(type: "decimal(14,2)", nullable: false),
+                TotalVat = table.Column<decimal>(type: "decimal(14,2)", nullable: false),
+                TotalNet = table.Column<decimal>(type: "decimal(14,2)", nullable: false),
+                InstantPayFeeVat = table.Column<decimal>(type: "decimal(14,2)", nullable: false),
+                FlaggedMissingConfigCount = table.Column<int>(nullable: false, defaultValue: 0),
+                ReportDataJson = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                CsvContent = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                ExportFormat = table.Column<string>(maxLength: 10, nullable: false, defaultValue: "CSV"),
+                GeneratedByActorId = table.Column<Guid>(nullable: false),
+                GeneratedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()"),
+                CreatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()"),
+                UpdatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()")
+            },
+            constraints: table => table.PrimaryKey("PK_VatReports", x => x.Id));
+        migrationBuilder.CreateIndex("IX_VatReports_DateRange_Merchant", "VatReports", new[] { "PeriodStart", "PeriodEnd", "MerchantActorId" });
+        migrationBuilder.CreateIndex("IX_VatReports_GeneratedAt", "VatReports", "GeneratedAt");
+
         // ── Seed default finance parameters ────────────────────────────────────
         var systemActorId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var now = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -456,6 +483,7 @@ public partial class InitialCreate : Migration
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.DropTable("VatReports");
         migrationBuilder.DropTable("ReconciliationReports");
         migrationBuilder.DropTable("CashSettlements");
         migrationBuilder.DropTable("CorporateInvoices");

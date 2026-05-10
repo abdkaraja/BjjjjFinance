@@ -3,6 +3,7 @@ using BjeekFinance.Application.Interfaces;
 using BjeekFinance.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using System.Text;
 
 namespace BjeekFinance.API.Controllers;
 
@@ -13,8 +14,13 @@ namespace BjeekFinance.API.Controllers;
 public class AdminFinanceController : ControllerBase
 {
     private readonly IAdminFinanceService _admin;
+    private readonly IVatReportService _vat;
 
-    public AdminFinanceController(IAdminFinanceService admin) => _admin = admin;
+    public AdminFinanceController(IAdminFinanceService admin, IVatReportService vat)
+    {
+        _admin = admin;
+        _vat = vat;
+    }
 
     // ── Dunning ────────────────────────────────────────────────────────────────
 
@@ -154,6 +160,55 @@ public class AdminFinanceController : ControllerBase
     {
         var csv = await _admin.ExportWalletsCsvAsync(actorType, cityId, ct);
         return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"wallets-export-{DateTime.UtcNow:yyyyMMdd}.csv");
+    }
+
+    // ── UC-AD-FIN-04: VAT Reports ───────────────────────────────────────────────
+
+    /// <summary>
+    /// UC-AD-FIN-04: Generate a ZATCA-compliant VAT report for the given period.
+    /// Optional merchant actor and service type filters.
+    /// Instant Pay fee VAT reported separately as platform service revenue.
+    /// Missing tax config (VAT = 0 on taxable gross) flagged in report.
+    /// CSV export with all ZATCA-required fields.
+    /// </summary>
+    [HttpPost("vat-reports")]
+    [Authorize(Policy = "FinanceManager")]
+    [ProducesResponseType(typeof(VatReportDto), StatusCodes.Status201Created)]
+    public async Task<IActionResult> GenerateVatReport(
+        [FromQuery] DateTime periodStart,
+        [FromQuery] DateTime periodEnd,
+        [FromQuery] Guid? merchantActorId,
+        [FromQuery] string? serviceType,
+        CancellationToken ct)
+    {
+        var adminId = GetActorId();
+        var result = await _vat.GenerateVatReportAsync(periodStart, periodEnd, merchantActorId, serviceType, ct);
+        return CreatedAtAction(nameof(GetVatReports), new { periodStart, periodEnd }, result);
+    }
+
+    /// <summary>List previously generated VAT reports by period and optional merchant.</summary>
+    [HttpGet("vat-reports")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(IEnumerable<VatReportDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetVatReports(
+        [FromQuery] DateTime from,
+        [FromQuery] DateTime to,
+        [FromQuery] Guid? merchantActorId,
+        CancellationToken ct)
+    {
+        var result = await _vat.GetVatReportsAsync(from, to, merchantActorId, ct);
+        return Ok(result);
+    }
+
+    /// <summary>Download VAT report CSV by report ID.</summary>
+    [HttpGet("vat-reports/{reportId:guid}/csv")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadVatReportCsv(Guid reportId, CancellationToken ct)
+    {
+        var csv = await _vat.GetVatReportCsvAsync(reportId, ct);
+        return File(Encoding.UTF8.GetBytes(csv), "text/csv", $"vat-report-{reportId:N[..8]}-{DateTime.UtcNow:yyyyMMdd}.csv");
     }
 
     // ── Finance Parameters ─────────────────────────────────────────────────────

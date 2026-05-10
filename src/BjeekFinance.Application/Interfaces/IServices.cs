@@ -295,6 +295,25 @@ public interface ICashSettlementService
     Task<IEnumerable<CashReconciliationReportDto>> GetReportsAsync(DateTime from, DateTime to, Guid? cityId = null, CancellationToken ct = default);
 }
 
+// ── VAT Report Service (UC-AD-FIN-04) ──────────────────────────────────────────
+
+public interface IVatReportService
+{
+    /// <summary>
+    /// UC-AD-FIN-04: Generate ZATCA-compliant VAT report.
+    /// Aggregates rides, orders, Instant Pay fee VAT, cancellation fees.
+    /// Merchant-specific filter available. Missing tax config → flagged.
+    /// CSV stored with report. ZATCA-compliant fields included.
+    /// </summary>
+    Task<VatReportDto> GenerateVatReportAsync(DateTime periodStart, DateTime periodEnd, Guid? merchantActorId = null, string? serviceType = null, CancellationToken ct = default);
+
+    /// <summary>List previously generated VAT reports.</summary>
+    Task<IEnumerable<VatReportDto>> GetVatReportsAsync(DateTime from, DateTime to, Guid? merchantActorId = null, CancellationToken ct = default);
+
+    /// <summary>Get CSV content for a stored report by ID.</summary>
+    Task<string> GetVatReportCsvAsync(Guid reportId, CancellationToken ct = default);
+}
+
 // ── KYC / Payout Account Service ──────────────────────────────────────────────
 
 public interface IKycService

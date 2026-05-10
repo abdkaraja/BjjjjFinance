@@ -234,6 +234,27 @@ public class CashSettlementConfiguration : IEntityTypeConfiguration<CashSettleme
     }
 }
 
+public class VatReportConfiguration : IEntityTypeConfiguration<VatReport>
+{
+    public void Configure(EntityTypeBuilder<VatReport> builder)
+    {
+        builder.ToTable("VatReports");
+        builder.HasKey(r => r.Id);
+
+        builder.Property(r => r.ReportDataJson).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(r => r.CsvContent).HasColumnType("nvarchar(max)");
+        builder.Property(r => r.ServiceType).HasMaxLength(50);
+        builder.Property(r => r.ExportFormat).HasMaxLength(10).HasDefaultValue("CSV");
+        builder.Property(r => r.TotalGross).HasPrecision(14, 2);
+        builder.Property(r => r.TotalVat).HasPrecision(14, 2);
+        builder.Property(r => r.TotalNet).HasPrecision(14, 2);
+        builder.Property(r => r.InstantPayFeeVat).HasPrecision(14, 2);
+
+        builder.HasIndex(r => new { r.PeriodStart, r.PeriodEnd, r.MerchantActorId });
+        builder.HasIndex(r => r.GeneratedAt);
+    }
+}
+
 public class ReconciliationReportConfiguration : IEntityTypeConfiguration<ReconciliationReport>
 {
     public void Configure(EntityTypeBuilder<ReconciliationReport> builder)

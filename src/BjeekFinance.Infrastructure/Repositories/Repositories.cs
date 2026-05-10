@@ -119,6 +119,21 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
 
     public async Task<int> GetByActorCountAsync(Guid actorId, CancellationToken ct = default)
         => await _set.CountAsync(t => t.Wallet.ActorId == actorId, ct);
+
+    public async Task<IEnumerable<Transaction>> GetByDateRangeWithWalletAsync(DateTime from, DateTime to, string? serviceType = null, CancellationToken ct = default)
+    {
+        var query = _set.Include(t => t.Wallet).Where(t => t.CreatedAt >= from && t.CreatedAt <= to);
+        if (!string.IsNullOrEmpty(serviceType))
+        {
+            query = serviceType.ToLowerInvariant() switch
+            {
+                "ride" => query.Where(t => t.RideId != null),
+                "delivery" or "food" or "grocery" => query.Where(t => t.OrderId != null),
+                _ => query
+            };
+        }
+        return await query.OrderByDescending(t => t.CreatedAt).ToListAsync(ct);
+    }
 }
 
 // ── Payout Request Repository ──────────────────────────────────────────────────
@@ -171,6 +186,9 @@ public class InstantPayRepository : Repository<InstantPayCashout>, IInstantPayRe
 
     public async Task<InstantPayCashout?> GetByPayoutRequestIdAsync(Guid payoutRequestId, CancellationToken ct = default)
         => await _set.FirstOrDefaultAsync(i => i.PayoutRequestId == payoutRequestId, ct);
+
+    public async Task<IEnumerable<InstantPayCashout>> GetByDateRangeAsync(DateTime from, DateTime to, CancellationToken ct = default)
+        => await _set.Where(i => i.CreatedAt >= from && i.CreatedAt <= to).OrderByDescending(i => i.CreatedAt).ToListAsync(ct);
 }
 
 // ── Payout Account Repository ──────────────────────────────────────────────────
@@ -268,6 +286,20 @@ public class CashSettlementRepository : Repository<CashSettlement>, ICashSettlem
     }
 }
 
+// ── Vat Report Repository ──────────────────────────────────────────────────────
+
+public class VatReportRepository : Repository<VatReport>, IVatReportRepository
+{
+    public VatReportRepository(BjeekFinanceDbContext ctx) : base(ctx) { }
+
+    public async Task<IEnumerable<VatReport>> GetByPeriodAsync(DateTime from, DateTime to, Guid? merchantActorId = null, CancellationToken ct = default)
+    {
+        var query = _set.Where(r => r.PeriodStart >= from && r.PeriodEnd <= to);
+        if (merchantActorId.HasValue) query = query.Where(r => r.MerchantActorId == merchantActorId.Value);
+        return await query.OrderByDescending(r => r.GeneratedAt).ToListAsync(ct);
+    }
+}
+
 // ── Reconciliation Report Repository ────────────────────────────────────────────
 
 public class ReconciliationReportRepository : Repository<ReconciliationReport>, IReconciliationReportRepository
@@ -355,6 +387,7 @@ public class UnitOfWork : IUnitOfWork
     public IRefundRepository Refunds { get; }
     public ICashSettlementRepository CashSettlements { get; }
     public IReconciliationReportRepository ReconciliationReports { get; }
+    public IVatReportRepository VatReports { get; }
     public IFinanceParameterRepository FinanceParameters { get; }
 
     public UnitOfWork(BjeekFinanceDbContext ctx)
@@ -370,6 +403,7 @@ public class UnitOfWork : IUnitOfWork
         Refunds = new RefundRepository(ctx);
         CashSettlements = new CashSettlementRepository(ctx);
         ReconciliationReports = new ReconciliationReportRepository(ctx);
+        VatReports = new VatReportRepository(ctx);
         FinanceParameters = new FinanceParameterRepository(ctx);
     }
 

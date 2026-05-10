@@ -607,3 +607,35 @@ public record CashReconciliationReportDto(
 public record EscalateSettlementRequest(
     string Notes
 );
+
+// ── UC-AD-FIN-04: VAT Report ───────────────────────────────────────────────────
+
+public record VatReportLineDto(
+    string InvoiceId,
+    DateTime TransactionDate,
+    Guid ActorId,
+    string ActorType,
+    decimal GrossAmount,
+    decimal VatRate,
+    decimal VatAmount,
+    decimal NetAmount,
+    string ServiceType,
+    string? MerchantId,
+    bool MissingTaxConfig
+);
+
+public record VatReportDto(
+    Guid ReportId,
+    DateTime PeriodStart,
+    DateTime PeriodEnd,
+    Guid? MerchantActorId,
+    string? ServiceType,
+    decimal TotalGross,
+    decimal TotalVat,
+    decimal TotalNet,
+    decimal InstantPayFeeVat,
+    int FlaggedMissingConfigCount,
+    string ExportFormat,
+    Guid GeneratedByActorId,
+    DateTime GeneratedAt
+);

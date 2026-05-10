@@ -55,6 +55,9 @@ public interface ITransactionRepository : IRepository<Transaction>
     Task<IEnumerable<Transaction>> GetByRideAsync(Guid rideId, CancellationToken ct = default);
     Task<IEnumerable<Transaction>> GetByOrderAsync(Guid orderId, CancellationToken ct = default);
     Task<int> GetByActorCountAsync(Guid actorId, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-04: Get transactions by date range with wallet data for VAT reporting.</summary>
+    Task<IEnumerable<Transaction>> GetByDateRangeWithWalletAsync(DateTime from, DateTime to, string? serviceType = null, CancellationToken ct = default);
 }
 
 public interface IPayoutRequestRepository : IRepository<PayoutRequest>
@@ -79,6 +82,9 @@ public interface IInstantPayRepository : IRepository<InstantPayCashout>
 
     /// <summary>Find the cashout linked to a fallback PayoutRequest.</summary>
     Task<InstantPayCashout?> GetByPayoutRequestIdAsync(Guid payoutRequestId, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-04: Get Instant Pay cashouts in a date range with VatOnFee data.</summary>
+    Task<IEnumerable<InstantPayCashout>> GetByDateRangeAsync(DateTime from, DateTime to, CancellationToken ct = default);
 }
 
 public interface IPayoutAccountRepository : IRepository<PayoutAccount>
@@ -115,6 +121,11 @@ public interface IRefundRepository : IRepository<Refund>
     Task<decimal> GetTotalRefundedAmountAsync(Guid originalTransactionId, CancellationToken ct = default);
 }
 
+public interface IVatReportRepository : IRepository<VatReport>
+{
+    Task<IEnumerable<VatReport>> GetByPeriodAsync(DateTime from, DateTime to, Guid? merchantActorId = null, CancellationToken ct = default);
+}
+
 public interface ICashSettlementRepository : IRepository<CashSettlement>
 {
     Task<IEnumerable<CashSettlement>> GetByDriverAsync(Guid driverId, CancellationToken ct = default);
@@ -149,6 +160,7 @@ public interface IUnitOfWork : IAsyncDisposable
     IRefundRepository Refunds { get; }
     ICashSettlementRepository CashSettlements { get; }
     IReconciliationReportRepository ReconciliationReports { get; }
+    IVatReportRepository VatReports { get; }
     IFinanceParameterRepository FinanceParameters { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);
