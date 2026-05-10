@@ -453,8 +453,11 @@ public class FinanceParameterConfiguration : IEntityTypeConfiguration<FinancePar
         builder.Property(p => p.ParameterValue).HasMaxLength(500).IsRequired();
         builder.Property(p => p.Description).HasMaxLength(500);
         builder.Property(p => p.ServiceType).HasMaxLength(50);
+        builder.Property(p => p.ActorType).HasConversion<string>().HasMaxLength(20);
+        builder.Property(p => p.Tier).HasMaxLength(20);
+        builder.Property(p => p.Category).HasMaxLength(50);
         builder.Property(p => p.PreviousValue).HasPrecision(18, 4);
 
-        builder.HasIndex(p => new { p.ParameterKey, p.CityId, p.ServiceType, p.IsActive });
+        builder.HasIndex(p => new { p.ParameterKey, p.CityId, p.ServiceType, p.ActorType, p.Tier, p.IsActive });
     }
 }

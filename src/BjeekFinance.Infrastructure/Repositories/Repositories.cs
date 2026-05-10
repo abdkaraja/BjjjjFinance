@@ -399,7 +399,7 @@ public class FinanceParameterRepository : Repository<FinanceParameter>, IFinance
 
     public async Task<FinanceParameter?> GetActiveAsync(string key, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default)
     {
-        // Priority: city+serviceType → city → global
+        // Priority: city+serviceType → city → global (backward-compatible)
         var query = _set.Where(p => p.ParameterKey == key && p.IsActive);
 
         if (cityId.HasValue && serviceType is not null)
@@ -417,16 +417,57 @@ public class FinanceParameterRepository : Repository<FinanceParameter>, IFinance
         return await query.FirstOrDefaultAsync(p => p.CityId == null, ct);
     }
 
+    public async Task<FinanceParameter?> GetActiveScopedAsync(string key, Guid? cityId, string? serviceType, ActorType? actorType, string? tier, CancellationToken ct = default)
+    {
+        // Full scoped resolution: (city+serviceType+actorType+tier) → fallback tiers
+        var query = _set.Where(p => p.ParameterKey == key && p.IsActive);
+
+        var scoped = query;
+        if (cityId.HasValue) scoped = scoped.Where(p => p.CityId == cityId || p.CityId == null);
+        if (serviceType is not null) scoped = scoped.Where(p => p.ServiceType == serviceType || p.ServiceType == null);
+        if (actorType.HasValue) scoped = scoped.Where(p => p.ActorType == actorType || p.ActorType == null);
+        if (tier is not null) scoped = scoped.Where(p => p.Tier == tier || p.Tier == null);
+
+        // Order by specificity: most specific match first
+        var results = await scoped
+            .OrderByDescending(p => p.CityId == cityId ? 1 : 0)
+            .ThenByDescending(p => p.ServiceType == serviceType ? 1 : 0)
+            .ThenByDescending(p => p.ActorType == actorType ? 1 : 0)
+            .ThenByDescending(p => p.Tier == tier ? 1 : 0)
+            .ThenByDescending(p => p.Version)
+            .ToListAsync(ct);
+
+        return results.FirstOrDefault();
+    }
+
     public async Task<decimal> GetDecimalAsync(string key, decimal defaultValue, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default)
     {
         var param = await GetActiveAsync(key, cityId, serviceType, ct);
         return param is not null && decimal.TryParse(param.ParameterValue, out var val) ? val : defaultValue;
     }
 
-    public async Task<int> GetIntAsync(string key, int defaultValue, Guid? cityId = null, CancellationToken ct = default)
+    public async Task<int> GetIntAsync(string key, int defaultValue, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default)
     {
-        var param = await GetActiveAsync(key, cityId, null, ct);
+        var param = await GetActiveAsync(key, cityId, serviceType, ct);
         return param is not null && int.TryParse(param.ParameterValue, out var val) ? val : defaultValue;
+    }
+
+    public async Task<IEnumerable<FinanceParameter>> GetByCategoryAsync(string category, CancellationToken ct = default)
+        => await _set.Where(p => p.Category == category && p.IsActive).OrderBy(p => p.ParameterKey).ToListAsync(ct);
+
+    public async Task<IEnumerable<FinanceParameter>> GetHistoryAsync(string key, CancellationToken ct = default)
+        => await _set.Where(p => p.ParameterKey == key).OrderByDescending(p => p.Version).ToListAsync(ct);
+
+    public async Task<FinanceParameter?> GetPreviousVersionAsync(Guid currentId, CancellationToken ct = default)
+    {
+        var current = await _set.FindAsync([currentId], ct);
+        if (current is null) return null;
+        return await _set.Where(p => p.ParameterKey == current.ParameterKey
+            && p.Version < current.Version
+            && p.CityId == current.CityId
+            && p.ServiceType == current.ServiceType)
+            .OrderByDescending(p => p.Version)
+            .FirstOrDefaultAsync(ct);
     }
 }
 

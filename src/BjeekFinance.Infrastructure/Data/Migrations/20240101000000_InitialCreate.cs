@@ -11,7 +11,7 @@ public partial class InitialCreate : Migration
     /// <inheritdoc />
     protected override void Up(MigrationBuilder migrationBuilder)
     {
-        // ── FinanceParameters ──────────────────────────────────────────────────
+        // ── FinanceParameters (UC-AD-FIN-07) ───────────────────────────────────
         migrationBuilder.CreateTable(
             name: "FinanceParameters",
             columns: table => new
@@ -22,6 +22,9 @@ public partial class InitialCreate : Migration
                 Description = table.Column<string>(maxLength: 500, nullable: true),
                 CityId = table.Column<Guid>(nullable: true),
                 ServiceType = table.Column<string>(maxLength: 50, nullable: true),
+                ActorType = table.Column<string>(maxLength: 20, nullable: true),
+                Tier = table.Column<string>(maxLength: 20, nullable: true),
+                Category = table.Column<string>(maxLength: 50, nullable: true),
                 PreviousValue = table.Column<decimal>(type: "decimal(18,4)", nullable: true),
                 ChangedByActorId = table.Column<Guid>(nullable: false),
                 EffectiveFrom = table.Column<DateTime>(nullable: false),
@@ -33,9 +36,9 @@ public partial class InitialCreate : Migration
             constraints: table => table.PrimaryKey("PK_FinanceParameters", x => x.Id));
 
         migrationBuilder.CreateIndex(
-            name: "IX_FinanceParameters_Key_City_Service_Active",
+            name: "IX_FinanceParameters_Key_City_Service_Actor_Tier_Active",
             table: "FinanceParameters",
-            columns: new[] { "ParameterKey", "CityId", "ServiceType", "IsActive" });
+            columns: new[] { "ParameterKey", "CityId", "ServiceType", "ActorType", "Tier", "IsActive" });
 
         // ── PayoutAccounts ─────────────────────────────────────────────────────
         migrationBuilder.CreateTable(
@@ -558,43 +561,84 @@ public partial class InitialCreate : Migration
         var systemActorId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var now = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
 
-        var parameters = new[]
+        #nullable enable
+        (string Key, string Value, string Description, string? ActorType, string? ServiceType, string Category)[] parameters = new[]
         {
-            ("vat_rate",                          "0.15",    "ZATCA standard VAT rate"),
-            ("payout_minimum_threshold",          "50",      "Minimum payout amount in SAR"),
-            ("payout_fee",                        "0",       "Standard payout fee in SAR"),
-            ("payout_auto_approve_threshold",     "5000",    "Payouts above this SAR amount require Finance Admin approval"),
-            ("payout_super_admin_threshold",      "10000",   "Payouts above this SAR amount require Super Admin approval"),
-            ("instant_pay_min_balance",           "5",       "Minimum AVAILABLE balance to initiate Instant Pay in SAR"),
-            ("instant_pay_daily_limit_tier_b",    "3",       "Tier B daily manual cashout limit"),
-            ("instant_pay_daily_limit_tier_c",    "5",       "Tier C daily manual cashout limit"),
-            ("instant_pay_tier_a_trips",          "50",      "Trip count threshold to graduate to Tier B"),
-            ("instant_pay_tier_c_trips",          "500",     "Trip count threshold to graduate to Tier C"),
-            ("tip_window_hours",                  "2",       "Hours after ride completion within which a tip can be added"),
-            ("cash_settlement_pending_minutes",   "15",      "Minutes before digital earnings move from PENDING to AVAILABLE"),
-            ("promo_credit_expiry_days",          "30",      "Days until promo credit expires"),
-            ("courtesy_credit_expiry_days",       "90",      "Days until courtesy credit expires"),
-            ("courtesy_credit_monthly_cap",       "100",     "Maximum courtesy credit issuable per customer per month in SAR"),
-            ("write_off_finance_manager_limit",   "18500",   "Write-offs below this SAR amount are Finance Manager self-approve"),
-            ("bulk_adjustment_super_admin_limit", "50000",   "Bulk adjustments above this SAR total require Super Admin"),
-            ("cash_settlement_variance_threshold", "3",      "Cash settlement variance threshold in SAR — ≤ this auto-adjusts, > this flags for review"),
-            ("reconciliation_imbalance_threshold", "1",      "Bulk reconciliation imbalance threshold in SAR — > this triggers alert")
+            // ── Commission rates per service type (UC-AD-FIN-07) ───────────
+            ("commission_rate",                    "0.20",    "Commission rate — ride, KSA default",              (string?)null,      (string?)null,       "commission"),
+            ("commission_rate",                    "0.15",    "Commission rate — carpool, KSA default",            (string?)null,      "carpool",   "commission"),
+            ("commission_rate",                    "0.25",    "Commission rate — food delivery, KSA default",       null!,      "food",      "commission"),
+            ("commission_rate",                    "0.22",    "Commission rate — grocery, KSA default",             (string?)null,      "grocery",   "commission"),
+
+            ("vat_rate",                          "0.15",    "ZATCA standard VAT rate",                            (string?)null,      (string?)null,       "tax"),
+
+            ("payout_minimum_threshold",          "50",      "Minimum payout amount in SAR — Driver",              "Driver",   (string?)null,       "payout"),
+            ("payout_minimum_threshold",          "100",     "Minimum payout amount in SAR — Merchant",             "Merchant", (string?)null,       "payout"),
+            ("payout_fee",                        "0",       "Standard payout fee in SAR",                         (string?)null,      (string?)null,       "payout"),
+            ("payout_auto_approve_threshold",     "5000",    "Payouts above this SAR amount require Finance Admin approval",(string?)null,  (string?)null,       "payout"),
+            ("payout_super_admin_threshold",      "10000",   "Payouts above this SAR amount require Super Admin approval",   (string?)null,  (string?)null,       "payout"),
+
+            ("instant_pay_min_balance",           "5",       "Minimum AVAILABLE balance to initiate Instant Pay in SAR",(string?)null, (string?)null,       "instant_pay"),
+            ("instant_pay_fee",                   "3.00",    "Instant Pay flat fee — Tier A",                      (string?)null,      (string?)null,       "instant_pay"),
+            ("instant_pay_fee",                   "2.00",    "Instant Pay flat fee — Tier B",                      (string?)null,      (string?)null,       "instant_pay"),
+            ("instant_pay_fee",                   "1.00",    "Instant Pay flat fee — Tier C",                      (string?)null,      (string?)null,       "instant_pay"),
+            ("instant_pay_daily_limit",           "1",       "Instant Pay daily cashout limit — Tier A",           (string?)null,      (string?)null,       "instant_pay"),
+            ("instant_pay_daily_limit",           "3",       "Instant Pay daily cashout limit — Tier B",           (string?)null,      (string?)null,       "instant_pay"),
+            ("instant_pay_daily_limit",           "5",       "Instant Pay daily cashout limit — Tier C",           (string?)null,      (string?)null,       "instant_pay"),
+            ("instant_pay_tier_a_trips",          "50",      "Trip count threshold to graduate to Tier B",         (string?)null,      (string?)null,       "instant_pay"),
+            ("instant_pay_tier_c_trips",          "500",     "Trip count threshold to graduate to Tier C",         (string?)null,      (string?)null,       "instant_pay"),
+
+            ("refund_window_hours",               "168",     "Refund window — ride (7 days)",                      (string?)null,      "ride",      "refund"),
+            ("refund_window_hours",               "24",      "Refund window — food delivery (1 day)",              (string?)null,      "food",      "refund"),
+            ("refund_window_hours",               "48",      "Refund window — grocery (2 days)",                   (string?)null,      "grocery",   "refund"),
+
+            ("cash_settlement_variance_threshold", "3",     "Cash settlement variance threshold in SAR",           (string?)null,      (string?)null,       "cash"),
+            ("cash_settlement_pending_minutes",   "15",      "Minutes before digital earnings move PENDING→AVAILABLE",(string?)null, (string?)null,      "cash"),
+
+            ("dunning_bucket_notify_days",        "7",       "Days in dunning before Notify bucket",               (string?)null,      (string?)null,       "dunning"),
+            ("dunning_bucket_hold_payout_days",   "30",      "Days in dunning before HoldPayout bucket",           (string?)null,      (string?)null,       "dunning"),
+            ("dunning_bucket_hold_assignments_days","60",    "Days in dunning before HoldAssignments bucket",      (string?)null,      (string?)null,       "dunning"),
+
+            ("trust_tier_a_min_trips",            "0",       "Driver trust tier A: minimum completed trips",       (string?)null,      (string?)null,       "trust_tier"),
+            ("trust_tier_b_min_trips",            "50",      "Driver trust tier B: minimum completed trips",       (string?)null,      (string?)null,       "trust_tier"),
+            ("trust_tier_c_min_trips",            "500",     "Driver trust tier C: minimum completed trips",       (string?)null,      (string?)null,       "trust_tier"),
+            ("trust_tier_b_min_rating",           "4.5",     "Driver trust tier B: minimum rating",                (string?)null,      (string?)null,       "trust_tier"),
+            ("trust_tier_c_min_rating",           "4.7",     "Driver trust tier C: minimum rating",                (string?)null,      (string?)null,       "trust_tier"),
+
+            ("surge_multiplier_max",              "3.0",     "Maximum surge multiplier — standard zone",           (string?)null,      (string?)null,       "surge"),
+            ("surge_multiplier_max_airport",      "4.0",     "Maximum surge multiplier — airport zone",            (string?)null,      (string?)null,       "surge"),
+
+            ("weekly_sweep_day",                  "Sunday",  "Day of week for auto-balance sweep",                 (string?)null,      (string?)null,       "sweep"),
+            ("weekly_sweep_time_utc",             "02:00",   "UTC time for auto-balance sweep",                   (string?)null,      (string?)null,       "sweep"),
+
+            ("promo_credit_expiry_days",          "30",      "Days until promo credit expires",                   (string?)null,      (string?)null,       "credit"),
+            ("courtesy_credit_expiry_days",       "90",      "Days until courtesy credit expires",                (string?)null,      (string?)null,       "credit"),
+            ("courtesy_credit_monthly_cap",       "100",     "Maximum courtesy credit per customer/month in SAR", (string?)null,      (string?)null,       "credit"),
+
+            ("write_off_finance_manager_limit",   "18500",   "Write-offs below this SAR amount = Finance Manager self-approve",(string?)null, (string?)null, "admin"),
+            ("bulk_adjustment_super_admin_limit", "50000",   "Bulk adjustments above this SAR total require Super Admin",(string?)null, (string?)null,     "admin"),
+
+            ("reconciliation_imbalance_threshold", "1",     "Bulk reconciliation imbalance threshold in SAR",     (string?)null,      (string?)null,       "reconciliation"),
+            ("tip_window_hours",                  "2",       "Hours after ride completion within which tip can be added",(string?)null,(string?)null,      "tip")
         };
 
-        foreach (var (key, value, description) in parameters)
+        foreach (var (key, value, description, actorType, serviceType, category) in parameters)
         {
             migrationBuilder.InsertData("FinanceParameters", new[]
             {
                 "Id", "ParameterKey", "ParameterValue", "Description",
+                "ActorType", "ServiceType", "Category",
                 "ChangedByActorId", "EffectiveFrom", "IsActive", "Version",
                 "CreatedAt", "UpdatedAt"
             },
             new object[]
             {
                 Guid.NewGuid(), key, value, description,
+                actorType ?? (object)DBNull.Value, serviceType ?? (object)DBNull.Value, category,
                 systemActorId, now, true, 1, now, now
             });
         }
+        #nullable disable
     }
 
     /// <inheritdoc />

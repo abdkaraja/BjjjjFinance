@@ -196,6 +196,8 @@ public class CorporateInvoice : BaseEntity
 /// <summary>
 /// Finance parameter configuration — all thresholds admin-configurable and versioned.
 /// No financial parameter may be hardcoded in the application layer (SRS-FIN-001 §AR-7).
+/// UC-AD-FIN-07: Supports scoping by City, ServiceType, ActorType, and Instant Pay Tier.
+/// Every change is versioned with previous value, changed_by, effective_from.
 /// </summary>
 public class FinanceParameter : BaseEntity
 {
@@ -207,6 +209,15 @@ public class FinanceParameter : BaseEntity
     public Guid? CityId { get; set; }
 
     public string? ServiceType { get; set; } // ride | food | grocery | carpool
+
+    /// <summary>UC-AD-FIN-07: Actor type scope (Driver, Merchant, etc.). Null = all types.</summary>
+    public ActorType? ActorType { get; set; }
+
+    /// <summary>UC-AD-FIN-07: Instant Pay tier scope (TierA, TierB, TierC). Null = all tiers.</summary>
+    public string? Tier { get; set; }
+
+    /// <summary>UC-AD-FIN-07: Category for grouping parameters (commission, payout, fee, etc.).</summary>
+    public string? Category { get; set; }
 
     public decimal? PreviousValue { get; set; }
     public Guid ChangedByActorId { get; set; }

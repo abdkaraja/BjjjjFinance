@@ -340,6 +340,11 @@ public record FinanceParameterDto(
     string? Description,
     Guid? CityId,
     string? ServiceType,
+    ActorType? ActorType,
+    string? Tier,
+    string? Category,
+    decimal? PreviousValue,
+    Guid ChangedByActorId,
     int Version,
     DateTime EffectiveFrom
 );
@@ -349,8 +354,24 @@ public record UpdateParameterRequest(
     string Value,
     Guid? CityId,
     string? ServiceType,
+    ActorType? ActorType,
+    string? Tier,
+    string? Category,
     Guid ChangedByActorId,
     string? Description
+);
+
+/// <summary>UC-AD-FIN-07: Parameter rollback request — Super Admin only.</summary>
+public record RollbackParameterRequest(
+    Guid ParameterId,
+    Guid RollbackByActorId
+);
+
+/// <summary>UC-AD-FIN-07: Parameter category group summary.</summary>
+public record ParameterCategoryDto(
+    string Category,
+    int Count,
+    IEnumerable<FinanceParameterDto> Parameters
 );
 
 // ── Corporate Billing DTOs ─────────────────────────────────────────────────────

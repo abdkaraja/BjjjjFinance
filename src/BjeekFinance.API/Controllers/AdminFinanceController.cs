@@ -260,7 +260,7 @@ public class AdminFinanceController : ControllerBase
         return File(Encoding.UTF8.GetBytes(csv), "text/csv", $"bulk-reconciliation-{reportId:N[..8]}-{DateTime.UtcNow:yyyyMMdd}.csv");
     }
 
-    // ── Finance Parameters ─────────────────────────────────────────────────────
+    // ── UC-AD-FIN-07: Finance Parameters ────────────────────────────────────────
 
     /// <summary>
     /// Get all finance parameters.
@@ -274,7 +274,18 @@ public class AdminFinanceController : ControllerBase
         return Ok(result);
     }
 
-    /// <summary>Get a specific finance parameter with optional city and service-type scope.</summary>
+    /// <summary>
+    /// UC-AD-FIN-07: Get parameters grouped by category.
+    /// </summary>
+    [HttpGet("parameters/by-category")]
+    [ProducesResponseType(typeof(IEnumerable<ParameterCategoryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetParametersByCategory(CancellationToken ct)
+    {
+        var result = await _admin.GetParametersByCategoryAsync(ct);
+        return Ok(result);
+    }
+
+    /// <summary>Get a specific finance parameter with optional city, service-type, actor-type, and tier scope.</summary>
     [HttpGet("parameters/{key}")]
     [ProducesResponseType(typeof(FinanceParameterDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
@@ -282,23 +293,56 @@ public class AdminFinanceController : ControllerBase
         string key,
         [FromQuery] Guid? cityId,
         [FromQuery] string? serviceType,
+        [FromQuery] ActorType? actorType,
+        [FromQuery] string? tier,
         CancellationToken ct)
     {
-        var result = await _admin.GetParameterAsync(key, cityId, serviceType, ct);
+        var result = await _admin.GetParameterAsync(key, cityId, serviceType, actorType, tier, ct);
         return Ok(result);
     }
 
     /// <summary>
-    /// Update a finance parameter.
+    /// UC-AD-FIN-07: Get version history for a parameter key.
+    /// </summary>
+    [HttpGet("parameters/{key}/history")]
+    [ProducesResponseType(typeof(IEnumerable<FinanceParameterDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetParameterHistory(string key, CancellationToken ct)
+    {
+        var result = await _admin.GetParameterHistoryAsync(key, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// UC-AD-FIN-07: Update a finance parameter.
     /// Previous value retained as versioned history.
     /// Finance Admin level required; change immutably logged.
+    /// Commission rate changes above ±5% require Super Admin approval.
+    /// Supports scoping by City, ServiceType, ActorType, and Instant Pay Tier.
+    /// Effective date can be future-dated (scheduled activation via EffectiveFrom).
     /// </summary>
     [HttpPut("parameters")]
     [ProducesResponseType(typeof(FinanceParameterDto), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     public async Task<IActionResult> UpdateParameter([FromBody] UpdateParameterRequest req, CancellationToken ct)
     {
         var result = await _admin.UpdateParameterAsync(req, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// UC-AD-FIN-07: Rollback a parameter to its previous version — Super Admin only.
+    /// </summary>
+    [HttpPost("parameters/{parameterId:guid}/rollback")]
+    [Authorize(Policy = "SuperAdmin")]
+    [ProducesResponseType(typeof(FinanceParameterDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RollbackParameter(Guid parameterId, CancellationToken ct)
+    {
+        var adminId = GetActorId();
+        var request = new RollbackParameterRequest(parameterId, adminId);
+        var result = await _admin.RollbackParameterAsync(request, ct);
         return Ok(result);
     }
 

@@ -328,17 +328,39 @@ public class AdminFinanceService : IAdminFinanceService
         return sb.ToString();
     }
 
-    public async Task<FinanceParameterDto> GetParameterAsync(string key, Guid? cityId, string? serviceType, CancellationToken ct = default)
+    public async Task<FinanceParameterDto> GetParameterAsync(string key, Guid? cityId, string? serviceType, ActorType? actorType = null, string? tier = null, CancellationToken ct = default)
     {
-        var param = await _uow.FinanceParameters.GetActiveAsync(key, cityId, serviceType, ct)
+        var param = await _uow.FinanceParameters.GetActiveScopedAsync(key, cityId, serviceType, actorType, tier, ct)
             ?? throw new KeyNotFoundException($"Parameter '{key}' not found.");
         return MapParamDto(param);
     }
 
     public async Task<FinanceParameterDto> UpdateParameterAsync(UpdateParameterRequest req, CancellationToken ct = default)
     {
+        var existing = await _uow.FinanceParameters.GetActiveScopedAsync(req.Key, req.CityId, req.ServiceType, req.ActorType, req.Tier, ct);
+
+        // UC-AD-FIN-07: Commission rate changes above ±5% require Super Admin approval
+        if (req.Key == "commission_rate" && existing is not null
+            && decimal.TryParse(existing.ParameterValue, out var oldRate)
+            && decimal.TryParse(req.Value, out var newRate))
+        {
+            var pctChange = Math.Abs((newRate - oldRate) / oldRate) * 100;
+            if (pctChange > 5m)
+            {
+                await _audit.WriteAsync(new AuditLogRequest(
+                    AuditEventType.AdminOverride, "COMMISSION_RATE_CHANGE_PENDING_SUPER_ADMIN",
+                    req.ChangedByActorId, ActorRole.FinanceAdmin,
+                    existing.Id, "FINANCE_PARAMETER",
+                    JsonSerializer.Serialize(existing),
+                    JsonSerializer.Serialize(new { req.Value, pctChange }),
+                    req.CityId, null, null), ct);
+                await _uow.SaveChangesAsync(ct);
+                throw new UnauthorizedAccessException(
+                    $"Commission rate change of {pctChange:F1}% exceeds ±5% threshold. Super Admin approval required.");
+            }
+        }
+
         // Versioned — previous value retained; new version created
-        var existing = await _uow.FinanceParameters.GetActiveAsync(req.Key, req.CityId, req.ServiceType, ct);
         if (existing is not null)
         {
             existing.IsActive = false;
@@ -351,6 +373,9 @@ public class AdminFinanceService : IAdminFinanceService
             ParameterValue = req.Value,
             CityId = req.CityId,
             ServiceType = req.ServiceType,
+            ActorType = req.ActorType,
+            Tier = req.Tier,
+            Category = req.Category,
             Description = req.Description,
             ChangedByActorId = req.ChangedByActorId,
             EffectiveFrom = DateTime.UtcNow,
@@ -369,6 +394,70 @@ public class AdminFinanceService : IAdminFinanceService
 
         await _uow.SaveChangesAsync(ct);
         return MapParamDto(newParam);
+    }
+
+    /// <summary>UC-AD-FIN-07: Rollback parameter to previous version — Super Admin only.</summary>
+    public async Task<FinanceParameterDto> RollbackParameterAsync(RollbackParameterRequest req, CancellationToken ct = default)
+    {
+        var current = await _uow.FinanceParameters.GetByIdAsync(req.ParameterId, ct)
+            ?? throw new KeyNotFoundException($"Parameter {req.ParameterId} not found.");
+
+        var previous = await _uow.FinanceParameters.GetPreviousVersionAsync(req.ParameterId, ct)
+            ?? throw new InvalidOperationException("No previous version available for rollback.");
+
+        // Deactivate current
+        current.IsActive = false;
+        _uow.FinanceParameters.Update(current);
+
+        // Reactivate previous as new version
+        var rolledBack = new FinanceParameter
+        {
+            ParameterKey = current.ParameterKey,
+            ParameterValue = previous.ParameterValue,
+            CityId = current.CityId,
+            ServiceType = current.ServiceType,
+            ActorType = current.ActorType,
+            Tier = current.Tier,
+            Category = current.Category,
+            Description = current.Description,
+            ChangedByActorId = req.RollbackByActorId,
+            EffectiveFrom = DateTime.UtcNow,
+            Version = current.Version + 1,
+            PreviousValue = decimal.TryParse(current.ParameterValue, out var curVal) ? curVal : null
+        };
+        await _uow.FinanceParameters.AddAsync(rolledBack, ct);
+
+        await _audit.WriteAsync(new AuditLogRequest(
+            AuditEventType.AdminOverride, "PARAMETER_ROLLED_BACK",
+            req.RollbackByActorId, ActorRole.SuperAdmin,
+            rolledBack.Id, "FINANCE_PARAMETER",
+            JsonSerializer.Serialize(current),
+            JsonSerializer.Serialize(rolledBack),
+            current.CityId, null, null), ct);
+
+        await _uow.SaveChangesAsync(ct);
+        return MapParamDto(rolledBack);
+    }
+
+    /// <summary>UC-AD-FIN-07: Get version history for a parameter key.</summary>
+    public async Task<IEnumerable<FinanceParameterDto>> GetParameterHistoryAsync(string key, CancellationToken ct = default)
+    {
+        var history = await _uow.FinanceParameters.GetHistoryAsync(key, ct);
+        return history.Select(MapParamDto);
+    }
+
+    /// <summary>UC-AD-FIN-07: Get all parameters grouped by category.</summary>
+    public async Task<IEnumerable<ParameterCategoryDto>> GetParametersByCategoryAsync(CancellationToken ct = default)
+    {
+        var all = await _uow.FinanceParameters.GetAllAsync(ct);
+        var active = all.Where(p => p.IsActive);
+        var grouped = active.GroupBy(p => p.Category ?? "uncategorized")
+            .Select(g => new ParameterCategoryDto(
+                g.Key,
+                g.Count(),
+                g.Select(MapParamDto)))
+            .OrderBy(g => g.Category);
+        return grouped;
     }
 
     public async Task<string> ExportWalletsCsvAsync(ActorType? actorType, Guid? cityId, CancellationToken ct = default)
@@ -408,7 +497,8 @@ public class AdminFinanceService : IAdminFinanceService
 
     private static FinanceParameterDto MapParamDto(FinanceParameter p) => new(
         p.Id, p.ParameterKey, p.ParameterValue, p.Description,
-        p.CityId, p.ServiceType, p.Version, p.EffectiveFrom);
+        p.CityId, p.ServiceType, p.ActorType, p.Tier, p.Category,
+        p.PreviousValue, p.ChangedByActorId, p.Version, p.EffectiveFrom);
 }
 
 public class CorporateBillingService : ICorporateBillingService

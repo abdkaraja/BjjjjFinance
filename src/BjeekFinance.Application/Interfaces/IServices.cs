@@ -211,8 +211,18 @@ public interface IAdminFinanceService
     /// <summary>UC-AD-FIN-01: Export wallet data as CSV for selected actor type, city.</summary>
     Task<string> ExportWalletsCsvAsync(ActorType? actorType, Guid? cityId, CancellationToken ct = default);
 
-    Task<FinanceParameterDto> GetParameterAsync(string key, Guid? cityId, string? serviceType, CancellationToken ct = default);
+    Task<FinanceParameterDto> GetParameterAsync(string key, Guid? cityId, string? serviceType, ActorType? actorType = null, string? tier = null, CancellationToken ct = default);
     Task<FinanceParameterDto> UpdateParameterAsync(UpdateParameterRequest request, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-07: Rollback a parameter to its previous version — Super Admin only.</summary>
+    Task<FinanceParameterDto> RollbackParameterAsync(RollbackParameterRequest request, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-07: Get version history for a parameter key.</summary>
+    Task<IEnumerable<FinanceParameterDto>> GetParameterHistoryAsync(string key, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-07: Get all parameters grouped by category.</summary>
+    Task<IEnumerable<ParameterCategoryDto>> GetParametersByCategoryAsync(CancellationToken ct = default);
+
     Task<IEnumerable<FinanceParameterDto>> GetAllParametersAsync(CancellationToken ct = default);
 }
 

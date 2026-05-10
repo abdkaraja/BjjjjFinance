@@ -198,7 +198,7 @@ public class WalletService : IWalletService
 
             // Enforce 15-minute settlement window — admin-configurable
             var settlementMinutes = await _uow.FinanceParameters.GetIntAsync(
-                "cash_settlement_pending_minutes", 15, wallet.CityId, ct);
+                "cash_settlement_pending_minutes", 15, wallet.CityId, null, ct);
 
             if (wallet.PendingSince.HasValue)
             {
@@ -231,7 +231,7 @@ public class WalletService : IWalletService
     {
         // Read admin-configurable settlement window — never hardcoded
         var settlementMinutes = await _uow.FinanceParameters.GetIntAsync(
-            "cash_settlement_pending_minutes", 15, null, ct);
+            "cash_settlement_pending_minutes", 15, null, null, ct);
 
         var wallets = await _uow.Wallets.GetWalletsWithPendingOlderThanAsync(settlementMinutes, ct);
 

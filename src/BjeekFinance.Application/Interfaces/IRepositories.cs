@@ -163,8 +163,21 @@ public interface IBulkReconciliationReportRepository : IRepository<BulkReconcili
 public interface IFinanceParameterRepository : IRepository<FinanceParameter>
 {
     Task<FinanceParameter?> GetActiveAsync(string key, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-07: Scoped lookup with ActorType and Tier dimensions.</summary>
+    Task<FinanceParameter?> GetActiveScopedAsync(string key, Guid? cityId, string? serviceType, ActorType? actorType, string? tier, CancellationToken ct = default);
+
     Task<decimal> GetDecimalAsync(string key, decimal defaultValue, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default);
-    Task<int> GetIntAsync(string key, int defaultValue, Guid? cityId = null, CancellationToken ct = default);
+    Task<int> GetIntAsync(string key, int defaultValue, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-07: Get all active parameters for a given category.</summary>
+    Task<IEnumerable<FinanceParameter>> GetByCategoryAsync(string category, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-07: Get version history for a parameter key (all scopes).</summary>
+    Task<IEnumerable<FinanceParameter>> GetHistoryAsync(string key, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-07: Get the previous active version for rollback.</summary>
+    Task<FinanceParameter?> GetPreviousVersionAsync(Guid currentId, CancellationToken ct = default);
 }
 
 public interface IUnitOfWork : IAsyncDisposable

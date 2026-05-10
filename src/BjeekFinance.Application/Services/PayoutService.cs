@@ -528,8 +528,8 @@ public class InstantPayService : IInstantPayService
 
         // Daily limit check — resets at local city midnight
         var dailyLimit = wallet.InstantPayTier == InstantPayTier.TierC
-            ? await _uow.FinanceParameters.GetIntAsync("instant_pay_daily_limit_tier_c", 5, wallet.CityId, ct)
-            : await _uow.FinanceParameters.GetIntAsync("instant_pay_daily_limit_tier_b", 3, wallet.CityId, ct);
+            ? await _uow.FinanceParameters.GetIntAsync("instant_pay_daily_limit_tier_c", 5, wallet.CityId, null, ct)
+            : await _uow.FinanceParameters.GetIntAsync("instant_pay_daily_limit_tier_b", 3, wallet.CityId, null, ct);
 
         if (wallet.InstantPayDailyCount >= dailyLimit)
             return Fail($"Daily limit of {dailyLimit} cashouts reached.", wallet);
@@ -615,8 +615,8 @@ public class InstantPayService : IInstantPayService
     {
         // Nightly job: promote/demote wallets based on trip count, fraud flags
         // All thresholds admin-configurable — never hardcoded
-        var tierATripThreshold = await _uow.FinanceParameters.GetIntAsync("instant_pay_tier_a_trips", 50, null, ct);
-        var tierCTripThreshold = await _uow.FinanceParameters.GetIntAsync("instant_pay_tier_c_trips", 500, null, ct);
+        var tierATripThreshold = await _uow.FinanceParameters.GetIntAsync("instant_pay_tier_a_trips", 50, null, null, ct);
+        var tierCTripThreshold = await _uow.FinanceParameters.GetIntAsync("instant_pay_tier_c_trips", 500, null, null, ct);
 
         // Fetch all driver/delivery wallets with sufficient trip history
         // Promotion: TierA → TierB (≥50 trips), TierB → TierC (≥500 trips)

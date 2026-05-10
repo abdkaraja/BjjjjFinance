@@ -40,7 +40,7 @@ public class RefundService : IRefundService
         // ── 2. Validate refund window (admin-configurable per service type) ──
         var serviceType = originalTxn.RideId.HasValue ? "ride" : "food_delivery";
         var refundWindowDays = await _uow.FinanceParameters.GetIntAsync(
-            $"refund_window_{serviceType}_days", serviceType == "ride" ? 7 : 1, null, ct);
+            $"refund_window_{serviceType}_days", serviceType == "ride" ? 7 : 1, null, null, ct);
         var txnAge = DateTime.UtcNow - originalTxn.CreatedAt;
         if (txnAge.TotalDays > refundWindowDays)
             throw new RefundWindowExpiredException(serviceType, refundWindowDays);
