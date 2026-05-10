@@ -211,6 +211,29 @@ public interface ICorporateBillingService
     Task<IEnumerable<CorporateAccountDto>> GetAccountsBelowAlertThresholdAsync(CancellationToken ct = default);
 }
 
+// ── Refund Service (UC-FIN-REFUND-01) ──────────────────────────────────────────
+
+public interface IRefundService
+{
+    /// <summary>
+    /// UC-FIN-REFUND-01: Initiate full refund.
+    /// Validates refund window, calculates commission reversal, routes refund
+    /// via original payment method (Card → gateway reversal, Wallet → instant credit).
+    /// Driver/merchant wallet debited for net; platform adjusted for commission reversal.
+    /// All wallet updates atomic via Saga pattern.
+    /// </summary>
+    Task<RefundDto> InitiateRefundAsync(InitiateRefundRequest request, CancellationToken ct = default);
+
+    /// <summary>Get refund by ID.</summary>
+    Task<RefundDto> GetRefundAsync(Guid refundId, CancellationToken ct = default);
+
+    /// <summary>Get all refunds for a transaction.</summary>
+    Task<RefundDto?> GetRefundByTransactionAsync(Guid transactionId, CancellationToken ct = default);
+
+    /// <summary>Get all refunds initiated by an actor.</summary>
+    Task<IEnumerable<RefundDto>> GetRefundsByActorAsync(Guid actorId, CancellationToken ct = default);
+}
+
 // ── KYC / Payout Account Service ──────────────────────────────────────────────
 
 public interface IKycService

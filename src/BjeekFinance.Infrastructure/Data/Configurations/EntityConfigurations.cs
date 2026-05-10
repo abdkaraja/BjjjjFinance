@@ -163,6 +163,46 @@ public class InstantPayCashoutConfiguration : IEntityTypeConfiguration<InstantPa
     }
 }
 
+public class RefundConfiguration : IEntityTypeConfiguration<Refund>
+{
+    public void Configure(EntityTypeBuilder<Refund> builder)
+    {
+        builder.ToTable("Refunds");
+        builder.HasKey(r => r.Id);
+
+        builder.Property(r => r.RefundType).HasMaxLength(20).IsRequired();
+        builder.Property(r => r.Amount).HasPrecision(12, 2).IsRequired();
+        builder.Property(r => r.PartialAmount).HasPrecision(12, 2);
+        builder.Property(r => r.ItemsRefunded);
+        builder.Property(r => r.CommissionReversalAmount).HasPrecision(12, 2).IsRequired();
+        builder.Property(r => r.VatReversalAmount).HasPrecision(12, 2).IsRequired();
+        builder.Property(r => r.ReasonCode).HasMaxLength(100).IsRequired();
+        builder.Property(r => r.DestinationMethod).HasConversion<string>().HasMaxLength(20);
+        builder.Property(r => r.Status).HasConversion<string>().HasMaxLength(20);
+        builder.Property(r => r.RejectionReasonCode).HasMaxLength(200);
+        builder.Property(r => r.ActorRole).HasConversion<string>().HasMaxLength(20);
+        builder.Property(r => r.PspReversalReference).HasMaxLength(200);
+
+        builder.HasOne(r => r.OriginalTransaction)
+            .WithMany()
+            .HasForeignKey(r => r.OriginalTransactionId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(r => r.Wallet)
+            .WithMany()
+            .HasForeignKey(r => r.WalletId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasOne(r => r.UserWallet)
+            .WithMany()
+            .HasForeignKey(r => r.UserWalletId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.HasIndex(r => r.OriginalTransactionId);
+        builder.HasIndex(r => r.ActorId);
+    }
+}
+
 public class AuditLogEntryConfiguration : IEntityTypeConfiguration<AuditLogEntry>
 {
     public void Configure(EntityTypeBuilder<AuditLogEntry> builder)

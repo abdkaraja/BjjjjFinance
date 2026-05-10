@@ -25,6 +25,7 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICorporateBillingService, CorporateBillingService>();
         services.AddScoped<IAuditService, AuditService>();
         services.AddScoped<IKycService, KycService>();
+        services.AddScoped<IRefundService, RefundService>();
 
         // Background service: auto-settles pending earnings after 15-minute window
         services.AddHostedService<PendingEarningsSettlementService>();

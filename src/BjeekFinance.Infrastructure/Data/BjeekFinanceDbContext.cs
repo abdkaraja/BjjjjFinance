@@ -17,6 +17,7 @@ public class BjeekFinanceDbContext : DbContext
     public DbSet<CorporateEmployee> CorporateEmployees => Set<CorporateEmployee>();
     public DbSet<CorporateInvoice> CorporateInvoices => Set<CorporateInvoice>();
     public DbSet<FinanceParameter> FinanceParameters => Set<FinanceParameter>();
+    public DbSet<Refund> Refunds => Set<Refund>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

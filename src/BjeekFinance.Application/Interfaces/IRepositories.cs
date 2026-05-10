@@ -91,6 +91,15 @@ public interface ICorporateAccountRepository : IRepository<CorporateAccount>
     Task<IEnumerable<CorporateInvoice>> GetOverdueInvoicesAsync(CancellationToken ct = default);
 }
 
+public interface IRefundRepository : IRepository<Refund>
+{
+    Task<IEnumerable<Refund>> GetByOriginalTransactionAsync(Guid originalTransactionId, CancellationToken ct = default);
+    Task<IEnumerable<Refund>> GetByActorAsync(Guid actorId, CancellationToken ct = default);
+
+    /// <summary>Sum of all refund amounts for a transaction (for cumulative cap enforcement).</summary>
+    Task<decimal> GetTotalRefundedAmountAsync(Guid originalTransactionId, CancellationToken ct = default);
+}
+
 public interface IFinanceParameterRepository : IRepository<FinanceParameter>
 {
     Task<FinanceParameter?> GetActiveAsync(string key, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default);
@@ -107,6 +116,7 @@ public interface IUnitOfWork : IAsyncDisposable
     IPayoutAccountRepository PayoutAccounts { get; }
     IAuditLogRepository AuditLogs { get; }
     ICorporateAccountRepository CorporateAccounts { get; }
+    IRefundRepository Refunds { get; }
     IFinanceParameterRepository FinanceParameters { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);

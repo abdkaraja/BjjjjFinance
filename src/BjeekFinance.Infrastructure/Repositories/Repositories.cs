@@ -223,6 +223,23 @@ public class CorporateAccountRepository : Repository<CorporateAccount>, ICorpora
             .Where(i => !i.IsPaid && i.DueDate < DateTime.UtcNow).ToListAsync(ct);
 }
 
+// ── Refund Repository ───────────────────────────────────────────────────────────
+
+public class RefundRepository : Repository<Refund>, IRefundRepository
+{
+    public RefundRepository(BjeekFinanceDbContext ctx) : base(ctx) { }
+
+    public async Task<IEnumerable<Refund>> GetByOriginalTransactionAsync(Guid originalTransactionId, CancellationToken ct = default)
+        => await _set.Where(r => r.OriginalTransactionId == originalTransactionId).OrderByDescending(r => r.CreatedAt).ToListAsync(ct);
+
+    public async Task<IEnumerable<Refund>> GetByActorAsync(Guid actorId, CancellationToken ct = default)
+        => await _set.Where(r => r.ActorId == actorId).OrderByDescending(r => r.CreatedAt).ToListAsync(ct);
+
+    public async Task<decimal> GetTotalRefundedAmountAsync(Guid originalTransactionId, CancellationToken ct = default)
+        => await _set.Where(r => r.OriginalTransactionId == originalTransactionId && r.Status == RefundStatus.Completed)
+            .SumAsync(r => r.Amount, ct);
+}
+
 // ── Finance Parameter Repository ───────────────────────────────────────────────
 
 public class FinanceParameterRepository : Repository<FinanceParameter>, IFinanceParameterRepository
@@ -276,6 +293,7 @@ public class UnitOfWork : IUnitOfWork
     public IPayoutAccountRepository PayoutAccounts { get; }
     public IAuditLogRepository AuditLogs { get; }
     public ICorporateAccountRepository CorporateAccounts { get; }
+    public IRefundRepository Refunds { get; }
     public IFinanceParameterRepository FinanceParameters { get; }
 
     public UnitOfWork(BjeekFinanceDbContext ctx)
@@ -288,6 +306,7 @@ public class UnitOfWork : IUnitOfWork
         PayoutAccounts = new PayoutAccountRepository(ctx);
         AuditLogs = new AuditLogRepository(ctx);
         CorporateAccounts = new CorporateAccountRepository(ctx);
+        Refunds = new RefundRepository(ctx);
         FinanceParameters = new FinanceParameterRepository(ctx);
     }
 

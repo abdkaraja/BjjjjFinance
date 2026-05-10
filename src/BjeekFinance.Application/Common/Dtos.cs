@@ -441,3 +441,35 @@ public record EmployeeBudgetDto(
 );
 
 public record DunningBucketInfo(string Bucket, DateTime Since);
+
+// ── Refund DTOs (UC-FIN-REFUND-01) ──────────────────────────────────────────────
+
+public record InitiateRefundRequest(
+    Guid OriginalTransactionId,
+    Guid ActorId,
+    ActorRole ActorRole,
+    string ReasonCode,
+    string RefundType = "FULL",
+    decimal? PartialAmount = null,
+    string? ItemsRefunded = null,
+    Guid? UserActorId = null
+);
+
+public record RefundDto(
+    Guid RefundId,
+    Guid OriginalTransactionId,
+    string RefundType,
+    decimal Amount,
+    decimal? PartialAmount,
+    string? ItemsRefunded,
+    decimal CommissionReversalAmount,
+    decimal VatReversalAmount,
+    string ReasonCode,
+    PayoutDestinationType DestinationMethod,
+    RefundStatus Status,
+    Guid ActorId,
+    ActorRole ActorRole,
+    string? PspReversalReference,
+    DateTime CreatedAt,
+    DateTime? CompletedAt
+);
