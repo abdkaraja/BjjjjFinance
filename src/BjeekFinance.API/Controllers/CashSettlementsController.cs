@@ -79,6 +79,77 @@ public class CashSettlementsController : ControllerBase
         return Ok(result);
     }
 
+    // ── UC-AD-FIN-03: Reconciliation Dashboard ─────────────────────────────────
+
+    /// <summary>
+    /// UC-AD-FIN-03: Reconciliation dashboard with variance severity buckets.
+    /// Green: ≤ SAR 3 (auto-adjusted)
+    /// Yellow: SAR 3–20 (pending review)
+    /// Red: > SAR 20 (flagged, shared with fraud)
+    /// </summary>
+    [HttpGet("reconciliation/dashboard")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(ReconciliationDashboardDto), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetDashboard(
+        [FromQuery] DateTime from,
+        [FromQuery] DateTime to,
+        [FromQuery] Guid? cityId,
+        CancellationToken ct)
+    {
+        var result = await _cash.GetDashboardAsync(from, to, cityId, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// UC-AD-FIN-03: Escalate a flagged settlement to the Fraud Detection team.
+    /// Variances > SAR 20 are automatically eligible for fraud escalation.
+    /// </summary>
+    [HttpPost("{settlementId:guid}/escalate")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(CashSettlementDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> Escalate(Guid settlementId,
+        [FromBody] EscalateSettlementRequest req, CancellationToken ct)
+    {
+        var adminId = GetAdminId();
+        var result = await _cash.EscalateToFraudAsync(settlementId, adminId, req.Notes, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// UC-AD-FIN-03: Generate a reconciliation report for audit.
+    /// Report stored with timestamp. CSV available via /reports/{reportId}/csv.
+    /// Variances > SAR 20 automatically flagged to fraud service (UC-AD-FIN-05).
+    /// </summary>
+    [HttpPost("reconciliation/reports")]
+    [Authorize(Policy = "FinanceManager")]
+    [ProducesResponseType(typeof(CashReconciliationReportDto), StatusCodes.Status201Created)]
+    public async Task<IActionResult> GenerateReport(
+        [FromQuery] DateTime from,
+        [FromQuery] DateTime to,
+        [FromQuery] Guid? cityId,
+        CancellationToken ct)
+    {
+        var adminId = GetAdminId();
+        var result = await _cash.GenerateReportAsync(from, to, cityId, adminId, ct);
+        return CreatedAtAction(nameof(GetReports), new { from, to, cityId }, result);
+    }
+
+    /// <summary>List previously generated reconciliation reports.</summary>
+    [HttpGet("reconciliation/reports")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(IEnumerable<CashReconciliationReportDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetReports(
+        [FromQuery] DateTime from,
+        [FromQuery] DateTime to,
+        [FromQuery] Guid? cityId,
+        CancellationToken ct)
+    {
+        var result = await _cash.GetReportsAsync(from, to, cityId, ct);
+        return Ok(result);
+    }
+
     private Guid GetAdminId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value, out var id) ? id : Guid.Empty;
 }

@@ -37,6 +37,15 @@ public interface IWalletRepository : IRepository<Wallet>
     /// InstantPayEnabled, KYC verified, not TierA, and available >= threshold.
     /// </summary>
     Task<IEnumerable<Wallet>> GetWalletsWithAutoCashoutEnabledAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-AD-FIN-01: Search wallets by actor ID, actor type, and city.
+    /// Name/phone search requires user service integration.
+    /// </summary>
+    Task<IEnumerable<Wallet>> SearchWalletsAsync(Guid? actorId, ActorType? actorType, Guid? cityId, int skip, int take, CancellationToken ct = default);
+
+    /// <summary>Bulk load wallets by IDs for admin views.</summary>
+    Task<IEnumerable<Wallet>> GetByIdsAsync(IEnumerable<Guid> walletIds, CancellationToken ct = default);
 }
 
 public interface ITransactionRepository : IRepository<Transaction>
@@ -54,6 +63,12 @@ public interface IPayoutRequestRepository : IRepository<PayoutRequest>
     Task<IEnumerable<PayoutRequest>> GetByActorAsync(Guid actorId, CancellationToken ct = default);
     Task<IEnumerable<PayoutRequest>> GetQueuedSariePayoutsAsync(CancellationToken ct = default);
     Task<IEnumerable<PayoutRequest>> GetAboveThresholdAsync(decimal threshold, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-02: Pending queue sorted by amount desc, then oldest first.</summary>
+    Task<IEnumerable<PayoutRequest>> GetPendingQueueOrderedAsync(CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-02: Load payout with its destination account for admin review.</summary>
+    Task<PayoutRequest?> GetByIdWithAccountAsync(Guid payoutId, CancellationToken ct = default);
 }
 
 public interface IInstantPayRepository : IRepository<InstantPayCashout>
@@ -105,6 +120,14 @@ public interface ICashSettlementRepository : IRepository<CashSettlement>
     Task<IEnumerable<CashSettlement>> GetByDriverAsync(Guid driverId, CancellationToken ct = default);
     Task<IEnumerable<CashSettlement>> GetFlaggedForReviewAsync(CancellationToken ct = default);
     Task<CashSettlement?> GetPendingByDriverAsync(Guid driverId, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-03: Query settlements by date range and optional city filter.</summary>
+    Task<IEnumerable<CashSettlement>> GetByDateRangeAsync(DateTime from, DateTime to, Guid? cityId = null, CancellationToken ct = default);
+}
+
+public interface IReconciliationReportRepository : IRepository<ReconciliationReport>
+{
+    Task<IEnumerable<ReconciliationReport>> GetByDateRangeAsync(DateTime from, DateTime to, Guid? cityId = null, CancellationToken ct = default);
 }
 
 public interface IFinanceParameterRepository : IRepository<FinanceParameter>
@@ -125,6 +148,7 @@ public interface IUnitOfWork : IAsyncDisposable
     ICorporateAccountRepository CorporateAccounts { get; }
     IRefundRepository Refunds { get; }
     ICashSettlementRepository CashSettlements { get; }
+    IReconciliationReportRepository ReconciliationReports { get; }
     IFinanceParameterRepository FinanceParameters { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);

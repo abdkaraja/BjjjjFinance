@@ -175,3 +175,15 @@ public enum WriteOffReasonCode
     TechnicalErrorAdjudicated,
     Other
 }
+
+public enum PayoutRejectionReasonCode
+{
+    InsufficientKyc,
+    SuspectedFraud,
+    InsufficientBalance,
+    InvalidDestination,
+    DocumentationPending,
+    ComplianceHold,
+    DuplicateRequest,
+    Other
+}

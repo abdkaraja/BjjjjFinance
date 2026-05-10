@@ -503,3 +503,107 @@ public record RefundDto(
     DateTime CreatedAt,
     DateTime? CompletedAt
 );
+
+// ── UC-AD-FIN-02: Payout Review & Approval ──────────────────────────────────────
+
+public record PayoutReviewDto(
+    Guid PayoutId,
+    Guid ActorId,
+    decimal AmountRequested,
+    decimal FeeAmount,
+    decimal NetTransferAmount,
+    PayoutDestinationType DestinationType,
+    PayoutStatus Status,
+    SarieWindowStatus SarieWindowStatus,
+    DateTime CreatedAt,
+    int AgeInHours,
+    KycStatus ActorKycStatus,
+    int FraudScore,
+    bool IsInDunning,
+    decimal WalletBalanceAvailable,
+    decimal WalletBalancePending,
+    decimal WalletBalanceHold,
+    string? DestinationAccountIdentifier,
+    string? DestinationAccountHolderName,
+    KycStatus DestinationVerificationStatus,
+    string? TransferReference,
+    Guid? ApprovedByActorId,
+    DateTime? ApprovedAt,
+    string? RejectionReasonCode,
+    DateTime? ScheduledAt
+);
+
+public record PendingPayoutQueueItemDto(
+    Guid PayoutId,
+    Guid ActorId,
+    decimal AmountRequested,
+    PayoutDestinationType DestinationType,
+    PayoutStatus Status,
+    SarieWindowStatus SarieWindowStatus,
+    KycStatus ActorKycStatus,
+    int FraudScore,
+    bool IsInDunning,
+    InstantPayTier Tier,
+    int AgeInHours,
+    DateTime CreatedAt,
+    decimal AvailableBalance
+);
+
+public record ApprovePayoutRequest(
+    bool ScheduleForNextWindow = false
+);
+
+public record SchedulePayoutRequest(
+    DateTime ScheduledUtc
+);
+
+// ── UC-AD-FIN-03: Cash Reconciliation ───────────────────────────────────────────
+
+public record ReconciliationDashboardDto(
+    DateTime DateFrom,
+    DateTime DateTo,
+    Guid? CityId,
+    int TotalSettlements,
+    int GreenCount,
+    int YellowCount,
+    int RedCount,
+    decimal TotalVariance,
+    decimal TotalExpectedCash,
+    decimal TotalReportedCash,
+    bool LedgerReconciled,
+    IEnumerable<ReconciliationSettlementLineDto> Settlements
+);
+
+public record ReconciliationSettlementLineDto(
+    Guid SettlementId,
+    Guid DriverId,
+    decimal ExpectedCash,
+    decimal ReportedCash,
+    decimal Variance,
+    CashSettlementStatus Status,
+    bool VarianceFlag,
+    string Severity,          // green | yellow | red
+    string? Notes,
+    bool EscalatedToFraud,
+    DateTime CreatedAt
+);
+
+public record CashReconciliationReportDto(
+    Guid ReportId,
+    DateTime DateFrom,
+    DateTime DateTo,
+    Guid? CityId,
+    decimal TotalExpectedCash,
+    decimal TotalReportedCash,
+    decimal TotalVariance,
+    int AutoAdjustedCount,
+    int FlaggedCount,
+    int EscalatedCount,
+    bool LedgerReconciled,
+    Guid GeneratedByActorId,
+    DateTime GeneratedAt
+);
+
+public record EscalateSettlementRequest(
+    string Notes
+);

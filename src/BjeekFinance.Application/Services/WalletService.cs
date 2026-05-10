@@ -402,10 +402,14 @@ public class WalletService : IWalletService
 
     public async Task<IEnumerable<WalletSummaryDto>> GetWalletsByActorTypeAsync(ActorType actorType, CancellationToken ct = default)
     {
-        var wallets = await _uow.Wallets.GetByInstantPayTierAsync(InstantPayTier.TierA, ct);
-        return wallets.Select(w => new WalletSummaryDto(
-            w.Id, w.ActorId, w.ActorType, w.BalanceAvailable,
-            w.BalancePending, w.KycStatus, w.IsInDunning, w.FraudScore));
+        var wallets = await _uow.Wallets.GetAllAsync(ct);
+        return wallets.Where(w => w.ActorType == actorType).Select(MapSummaryDto);
+    }
+
+    public async Task<IEnumerable<WalletSummaryDto>> SearchWalletsAsync(Guid? actorId, ActorType? actorType, Guid? cityId, int skip = 0, int take = 50, CancellationToken ct = default)
+    {
+        var wallets = await _uow.Wallets.SearchWalletsAsync(actorId, actorType, cityId, skip, take, ct);
+        return wallets.Select(MapSummaryDto);
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
@@ -456,4 +460,8 @@ public class WalletService : IWalletService
         w.BalanceRefundCredit, w.BalancePromoCredit, w.BalanceCourtesyCredit,
         w.LoyaltyPoints, w.KycStatus, w.InstantPayTier, w.InstantPayEnabled,
         w.IsInDunning, w.DunningBucket, w.FraudScore, w.CreatedAt, w.UpdatedAt);
+
+    private static WalletSummaryDto MapSummaryDto(Wallet w) => new(
+        w.Id, w.ActorId, w.ActorType, w.BalanceAvailable,
+        w.BalancePending, w.KycStatus, w.IsInDunning, w.FraudScore);
 }

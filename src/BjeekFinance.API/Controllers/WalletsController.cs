@@ -48,6 +48,26 @@ public class WalletsController : ControllerBase
     }
 
     /// <summary>
+    /// UC-AD-FIN-01: Search wallets with optional filters and pagination.
+    /// Supports search by actor ID, actor type, and city.
+    /// Name/phone search requires user service integration.
+    /// </summary>
+    [HttpGet("search")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(IEnumerable<WalletSummaryDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> Search(
+        [FromQuery] Guid? actorId = null,
+        [FromQuery] ActorType? actorType = null,
+        [FromQuery] Guid? cityId = null,
+        [FromQuery] int skip = 0,
+        [FromQuery] int take = 50,
+        CancellationToken ct = default)
+    {
+        var result = await _wallets.SearchWalletsAsync(actorId, actorType, cityId, skip, take, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
     /// Finance Admin: manually correct wallet balance.
     /// Immutable audit log written synchronously before response.
     /// </summary>

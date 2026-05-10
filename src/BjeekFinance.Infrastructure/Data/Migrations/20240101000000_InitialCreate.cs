@@ -346,6 +346,71 @@ public partial class InitialCreate : Migration
         migrationBuilder.CreateIndex("IX_CorporateInvoices_AccountId_Date", "CorporateInvoices",
             new[] { "CorporateAccountId", "InvoiceDate" });
 
+        // ── CashSettlements (UC-FIN-CASH-01 / UC-AD-FIN-03) ─────────────────────
+        migrationBuilder.CreateTable(
+            name: "CashSettlements",
+            columns: table => new
+            {
+                Id = table.Column<Guid>(nullable: false),
+                DriverId = table.Column<Guid>(nullable: false),
+                WalletId = table.Column<Guid>(nullable: false),
+                ExpectedCashTotal = table.Column<decimal>(type: "decimal(12,2)", nullable: false),
+                ReportedCashTotal = table.Column<decimal>(type: "decimal(12,2)", nullable: false),
+                VarianceAmount = table.Column<decimal>(type: "decimal(12,2)", nullable: false),
+                CommissionReceivableAmount = table.Column<decimal>(type: "decimal(12,2)", nullable: false),
+                Status = table.Column<string>(maxLength: 20, nullable: false),
+                VarianceFlag = table.Column<bool>(nullable: false, defaultValue: false),
+                TripIdsJson = table.Column<string>(nullable: true),
+                Notes = table.Column<string>(maxLength: 500, nullable: true),
+                ReviewedByActorId = table.Column<Guid>(nullable: true),
+                ReviewedAt = table.Column<DateTime>(nullable: true),
+                CompletedAt = table.Column<DateTime>(nullable: true),
+                CityId = table.Column<Guid>(nullable: true),
+                EscalatedToFraudAt = table.Column<DateTime>(nullable: true),
+                FraudCaseId = table.Column<string>(maxLength: 100, nullable: true),
+                LedgerTotal = table.Column<decimal>(type: "decimal(14,2)", nullable: true),
+                LedgerMatch = table.Column<bool>(nullable: false, defaultValue: true),
+                CreatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()"),
+                UpdatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()")
+            },
+            constraints: table =>
+            {
+                table.PrimaryKey("PK_CashSettlements", x => x.Id);
+                table.ForeignKey("FK_CashSettlements_Wallets", x => x.WalletId,
+                    "Wallets", "Id", onDelete: ReferentialAction.Restrict);
+            });
+        migrationBuilder.CreateIndex("IX_CashSettlements_DriverId", "CashSettlements", "DriverId");
+        migrationBuilder.CreateIndex("IX_CashSettlements_Status", "CashSettlements", "Status");
+        migrationBuilder.CreateIndex("IX_CashSettlements_CityId", "CashSettlements", "CityId");
+        migrationBuilder.CreateIndex("IX_CashSettlements_CreatedAt_CityId", "CashSettlements", new[] { "CreatedAt", "CityId" });
+
+        // ── ReconciliationReports (UC-AD-FIN-03) ───────────────────────────────
+        migrationBuilder.CreateTable(
+            name: "ReconciliationReports",
+            columns: table => new
+            {
+                Id = table.Column<Guid>(nullable: false),
+                DateFrom = table.Column<DateTime>(nullable: false),
+                DateTo = table.Column<DateTime>(nullable: false),
+                CityId = table.Column<Guid>(nullable: true),
+                TotalExpectedCash = table.Column<decimal>(type: "decimal(14,2)", nullable: false),
+                TotalReportedCash = table.Column<decimal>(type: "decimal(14,2)", nullable: false),
+                TotalVariance = table.Column<decimal>(type: "decimal(14,2)", nullable: false),
+                AutoAdjustedCount = table.Column<int>(nullable: false, defaultValue: 0),
+                FlaggedCount = table.Column<int>(nullable: false, defaultValue: 0),
+                EscalatedCount = table.Column<int>(nullable: false, defaultValue: 0),
+                LedgerReconciled = table.Column<bool>(nullable: false, defaultValue: true),
+                ReportDataJson = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                GeneratedByActorId = table.Column<Guid>(nullable: false),
+                CsvContent = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                GeneratedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()"),
+                CreatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()"),
+                UpdatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()")
+            },
+            constraints: table => table.PrimaryKey("PK_ReconciliationReports", x => x.Id));
+        migrationBuilder.CreateIndex("IX_ReconciliationReports_DateRange", "ReconciliationReports", new[] { "DateFrom", "DateTo", "CityId" });
+        migrationBuilder.CreateIndex("IX_ReconciliationReports_GeneratedAt", "ReconciliationReports", "GeneratedAt");
+
         // ── Seed default finance parameters ────────────────────────────────────
         var systemActorId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var now = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -355,8 +420,8 @@ public partial class InitialCreate : Migration
             ("vat_rate",                          "0.15",    "ZATCA standard VAT rate"),
             ("payout_minimum_threshold",          "50",      "Minimum payout amount in SAR"),
             ("payout_fee",                        "0",       "Standard payout fee in SAR"),
-            ("payout_auto_approve_threshold",     "10000",   "Payouts above this SAR amount require Finance Admin approval"),
-            ("payout_super_admin_threshold",      "37000",   "Payouts above this SAR amount require Super Admin approval"),
+            ("payout_auto_approve_threshold",     "5000",    "Payouts above this SAR amount require Finance Admin approval"),
+            ("payout_super_admin_threshold",      "10000",   "Payouts above this SAR amount require Super Admin approval"),
             ("instant_pay_min_balance",           "5",       "Minimum AVAILABLE balance to initiate Instant Pay in SAR"),
             ("instant_pay_daily_limit_tier_b",    "3",       "Tier B daily manual cashout limit"),
             ("instant_pay_daily_limit_tier_c",    "5",       "Tier C daily manual cashout limit"),
@@ -368,7 +433,8 @@ public partial class InitialCreate : Migration
             ("courtesy_credit_expiry_days",       "90",      "Days until courtesy credit expires"),
             ("courtesy_credit_monthly_cap",       "100",     "Maximum courtesy credit issuable per customer per month in SAR"),
             ("write_off_finance_manager_limit",   "18500",   "Write-offs below this SAR amount are Finance Manager self-approve"),
-            ("bulk_adjustment_super_admin_limit", "50000",   "Bulk adjustments above this SAR total require Super Admin")
+            ("bulk_adjustment_super_admin_limit", "50000",   "Bulk adjustments above this SAR total require Super Admin"),
+            ("cash_settlement_variance_threshold", "3",      "Cash settlement variance threshold in SAR — ≤ this auto-adjusts, > this flags for review")
         };
 
         foreach (var (key, value, description) in parameters)
@@ -390,6 +456,8 @@ public partial class InitialCreate : Migration
     /// <inheritdoc />
     protected override void Down(MigrationBuilder migrationBuilder)
     {
+        migrationBuilder.DropTable("ReconciliationReports");
+        migrationBuilder.DropTable("CashSettlements");
         migrationBuilder.DropTable("CorporateInvoices");
         migrationBuilder.DropTable("CorporateEmployees");
         migrationBuilder.DropTable("CorporateAccounts");

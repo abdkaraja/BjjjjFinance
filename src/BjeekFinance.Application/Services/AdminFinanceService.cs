@@ -203,6 +203,31 @@ public class AdminFinanceService : IAdminFinanceService
         return MapParamDto(newParam);
     }
 
+    public async Task<string> ExportWalletsCsvAsync(ActorType? actorType, Guid? cityId, CancellationToken ct = default)
+    {
+        var wallets = await _uow.Wallets.GetAllAsync(ct);
+        var filtered = wallets.AsEnumerable();
+
+        if (actorType.HasValue)
+            filtered = filtered.Where(w => w.ActorType == actorType.Value);
+        if (cityId.HasValue)
+            filtered = filtered.Where(w => w.CityId == cityId.Value);
+
+        var lines = new List<string>
+        {
+            "WalletId,ActorId,ActorType,Currency,BalanceAvailable,BalancePending,BalanceHold,CashReceivable,BalanceRefundCredit,BalancePromoCredit,BalanceCourtesyCredit,KycStatus,InstantPayTier,IsInDunning,FraudScore,CreatedAt"
+        };
+
+        foreach (var w in filtered.OrderBy(w => w.ActorType).ThenBy(w => w.CreatedAt))
+        {
+            lines.Add(
+                $"{w.Id},{w.ActorId},{w.ActorType},{w.Currency},{w.BalanceAvailable:F2},{w.BalancePending:F2},{w.BalanceHold:F2},{w.CashReceivable:F2}," +
+                $"{w.BalanceRefundCredit:F2},{w.BalancePromoCredit:F2},{w.BalanceCourtesyCredit:F2},{w.KycStatus},{w.InstantPayTier},{w.IsInDunning},{w.FraudScore},{w.CreatedAt:O}");
+        }
+
+        return string.Join(Environment.NewLine, lines);
+    }
+
     public async Task<IEnumerable<FinanceParameterDto>> GetAllParametersAsync(CancellationToken ct = default)
     {
         var all = await _uow.FinanceParameters.GetAllAsync(ct);

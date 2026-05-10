@@ -52,6 +52,9 @@ public interface IWalletService
     Task ProcessChargebackAsync(Guid walletId, decimal amount, Guid transactionId, CancellationToken ct = default);
 
     Task<IEnumerable<WalletSummaryDto>> GetWalletsByActorTypeAsync(ActorType actorType, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-01: Search wallets with optional filters and pagination.</summary>
+    Task<IEnumerable<WalletSummaryDto>> SearchWalletsAsync(Guid? actorId, ActorType? actorType, Guid? cityId, int skip = 0, int take = 50, CancellationToken ct = default);
 }
 
 // ── Payment Collection Service ─────────────────────────────────────────────────
@@ -85,12 +88,32 @@ public interface IPayoutService
     /// </summary>
     Task<PayoutRequestDto> InitiatePayoutAsync(InitiatePayoutRequest request, CancellationToken ct = default);
 
-    Task<PayoutRequestDto> ApprovePayoutAsync(Guid payoutId, Guid approverActorId, CancellationToken ct = default);
-    Task<PayoutRequestDto> RejectPayoutAsync(Guid payoutId, Guid approverActorId, string reasonCode, CancellationToken ct = default);
+    /// <summary>
+    /// UC-AD-FIN-02: Approve a pending payout. Auto-executes transfer:
+    /// STC Pay / open SARIE → Processing immediately.
+    /// Closed SARIE → Queued with scheduled next window.
+    /// Amount > superAdminThreshold requires actor with SuperAdmin role.
+    /// </summary>
+    Task<PayoutRequestDto> ApprovePayoutAsync(Guid payoutId, Guid approverActorId, bool scheduleForNextWindow = false, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-AD-FIN-02: Reject a pending payout with predefined reason code.
+    /// Releases hold back to available. ReasonCode must be from PayoutRejectionReasonCode enum.
+    /// </summary>
+    Task<PayoutRequestDto> RejectPayoutAsync(Guid payoutId, Guid approverActorId, PayoutRejectionReasonCode reasonCode, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-02: Schedule an approved payout for a specific SARIE window.</summary>
+    Task<PayoutRequestDto> SchedulePayoutAsync(Guid payoutId, DateTime scheduledUtc, CancellationToken ct = default);
 
     Task<IEnumerable<PayoutRequestDto>> GetPendingPayoutsAsync(CancellationToken ct = default);
     Task<IEnumerable<PayoutRequestDto>> GetByActorAsync(Guid actorId, CancellationToken ct = default);
     Task<PayoutRequestDto> GetByIdAsync(Guid payoutId, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-02: Pending queue sorted by amount desc, then oldest first.</summary>
+    Task<IEnumerable<PendingPayoutQueueItemDto>> GetPendingQueueAsync(CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-02: Detailed payout review with wallet/account/KYC info.</summary>
+    Task<PayoutReviewDto> GetPayoutReviewAsync(Guid payoutId, CancellationToken ct = default);
 
     /// <summary>Scheduled SARIE batch processor — processes queued transfers in open window.</summary>
     Task ProcessSarieQueueAsync(CancellationToken ct = default);
@@ -176,6 +199,9 @@ public interface IAdminFinanceService
 
     Task<ReconciliationReportDto> GenerateReconciliationReportAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default);
 
+    /// <summary>UC-AD-FIN-01: Export wallet data as CSV for selected actor type, city.</summary>
+    Task<string> ExportWalletsCsvAsync(ActorType? actorType, Guid? cityId, CancellationToken ct = default);
+
     Task<FinanceParameterDto> GetParameterAsync(string key, Guid? cityId, string? serviceType, CancellationToken ct = default);
     Task<FinanceParameterDto> UpdateParameterAsync(UpdateParameterRequest request, CancellationToken ct = default);
     Task<IEnumerable<FinanceParameterDto>> GetAllParametersAsync(CancellationToken ct = default);
@@ -253,6 +279,20 @@ public interface ICashSettlementService
     Task<CashSettlementDto> GetSettlementAsync(Guid settlementId, CancellationToken ct = default);
     Task<IEnumerable<CashSettlementDto>> GetByDriverAsync(Guid driverId, CancellationToken ct = default);
     Task<IEnumerable<CashSettlementDto>> GetFlaggedForReviewAsync(CancellationToken ct = default);
+
+    // ── UC-AD-FIN-03: Reconciliation Dashboard ───────────────────────────────
+
+    /// <summary>Dashboard with variance severity buckets and counts.</summary>
+    Task<ReconciliationDashboardDto> GetDashboardAsync(DateTime from, DateTime to, Guid? cityId = null, CancellationToken ct = default);
+
+    /// <summary>Escalate a flagged settlement to the Fraud Detection service (UC-AD-FIN-05).</summary>
+    Task<CashSettlementDto> EscalateToFraudAsync(Guid settlementId, Guid adminId, string notes, CancellationToken ct = default);
+
+    /// <summary>Generate a reconciliation report for the given date range / city.</summary>
+    Task<CashReconciliationReportDto> GenerateReportAsync(DateTime from, DateTime to, Guid? cityId, Guid adminId, CancellationToken ct = default);
+
+    /// <summary>List previously generated reconciliation reports.</summary>
+    Task<IEnumerable<CashReconciliationReportDto>> GetReportsAsync(DateTime from, DateTime to, Guid? cityId = null, CancellationToken ct = default);
 }
 
 // ── KYC / Payout Account Service ──────────────────────────────────────────────

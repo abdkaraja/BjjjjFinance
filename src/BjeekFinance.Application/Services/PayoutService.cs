@@ -109,7 +109,7 @@ public class PayoutService : IPayoutService
         catch { await _uow.RollbackAsync(ct); throw; }
     }
 
-    public async Task<PayoutRequestDto> ApprovePayoutAsync(Guid payoutId, Guid approverActorId, CancellationToken ct = default)
+    public async Task<PayoutRequestDto> ApprovePayoutAsync(Guid payoutId, Guid approverActorId, bool scheduleForNextWindow = false, CancellationToken ct = default)
     {
         await _uow.BeginTransactionAsync(ct);
         try
@@ -119,17 +119,53 @@ public class PayoutService : IPayoutService
             if (payout.Status != PayoutStatus.Pending)
                 throw new InvalidOperationException("Only pending payouts can be approved.");
 
-            payout.Status = PayoutStatus.Approved;
+            var superAdminThreshold = await _uow.FinanceParameters.GetDecimalAsync("payout_super_admin_threshold", 10_000m, null, null, ct);
+            if (payout.AmountRequested > superAdminThreshold)
+                throw new InvalidOperationException($"Payout {payoutId} exceeds Super Admin threshold ({superAdminThreshold:N0} SAR). Must be approved by a Super Admin.");
+
             payout.ApprovedByActorId = approverActorId;
             payout.ApprovedAt = DateTime.UtcNow;
+
+            // Auto-execute: if STC Pay or SARIE window is open, send to processing
+            // If IBAN + SARIE closed, or admin requested scheduling → queue for next window
+            bool isIBAN = payout.DestinationType == PayoutDestinationType.SaudiIban;
+            bool canExecuteNow = scheduleForNextWindow switch
+            {
+                true => false,
+                false when !isIBAN => true,
+                false when CheckSarieWindow(DateTime.UtcNow) == SarieWindowStatus.Open => true,
+                _ => false
+            };
+
+            if (canExecuteNow)
+            {
+                payout.Status = PayoutStatus.Processing;
+                payout.SarieWindowStatus = SarieWindowStatus.Open;
+            }
+            else
+            {
+                payout.Status = PayoutStatus.Approved;
+                payout.SarieWindowStatus = isIBAN && !scheduleForNextWindow
+                    ? SarieWindowStatus.Queued
+                    : SarieWindowStatus.Closed;
+                payout.ScheduledAt = NextSarieWindow(DateTime.UtcNow);
+            }
+
             payout.UpdatedAt = DateTime.UtcNow;
             _uow.PayoutRequests.Update(payout);
 
+            var auditSubtype = canExecuteNow ? "PAYOUT_APPROVED_EXECUTING" : "PAYOUT_APPROVED_QUEUED";
             await _audit.WriteAsync(new AuditLogRequest(
-                AuditEventType.Payout, "PAYOUT_APPROVED",
+                AuditEventType.Payout, auditSubtype,
                 approverActorId, ActorRole.FinanceAdmin,
                 payoutId, "PAYOUT", null,
-                JsonSerializer.Serialize(new { payoutId, approvedBy = approverActorId }),
+                JsonSerializer.Serialize(new
+                {
+                    payoutId, approvedBy = approverActorId,
+                    status = payout.Status.ToString(),
+                    sarieStatus = payout.SarieWindowStatus.ToString(),
+                    scheduledAt = payout.ScheduledAt
+                }),
                 null, null, null), ct);
 
             await _uow.SaveChangesAsync(ct);
@@ -139,23 +175,28 @@ public class PayoutService : IPayoutService
         catch { await _uow.RollbackAsync(ct); throw; }
     }
 
-    public async Task<PayoutRequestDto> RejectPayoutAsync(Guid payoutId, Guid approverActorId, string reasonCode, CancellationToken ct = default)
+    public async Task<PayoutRequestDto> RejectPayoutAsync(Guid payoutId, Guid approverActorId, PayoutRejectionReasonCode reasonCode, CancellationToken ct = default)
     {
+        if (!Enum.IsDefined(reasonCode))
+            throw new ArgumentException($"Invalid rejection reason code: {reasonCode}", nameof(reasonCode));
+
         await _uow.BeginTransactionAsync(ct);
         try
         {
             var payout = await _uow.PayoutRequests.GetByIdAsync(payoutId, ct)
                 ?? throw new KeyNotFoundException($"Payout {payoutId} not found.");
 
+            if (payout.Status != PayoutStatus.Pending)
+                throw new InvalidOperationException("Only pending payouts can be rejected.");
+
             var wallet = await _uow.Wallets.GetByIdWithLockAsync(payout.WalletId, ct)!;
-            // Release hold back to available
             wallet!.BalanceHold -= payout.AmountRequested;
             wallet.BalanceAvailable += payout.AmountRequested;
             wallet.UpdatedAt = DateTime.UtcNow;
             _uow.Wallets.Update(wallet);
 
             payout.Status = PayoutStatus.Rejected;
-            payout.RejectionReasonCode = reasonCode;
+            payout.RejectionReasonCode = reasonCode.ToString();
             payout.UpdatedAt = DateTime.UtcNow;
             _uow.PayoutRequests.Update(payout);
 
@@ -163,7 +204,7 @@ public class PayoutService : IPayoutService
                 AuditEventType.Payout, "PAYOUT_REJECTED",
                 approverActorId, ActorRole.FinanceAdmin,
                 payoutId, "PAYOUT", null,
-                JsonSerializer.Serialize(new { payoutId, reasonCode }),
+                JsonSerializer.Serialize(new { payoutId, reasonCode = reasonCode.ToString() }),
                 null, null, null), ct);
 
             await _uow.SaveChangesAsync(ct);
@@ -194,14 +235,19 @@ public class PayoutService : IPayoutService
 
     public async Task<PayoutRequestDto> CompletePayoutAsync(Guid payoutId, string pspTransactionId, string transferReference, CancellationToken ct = default)
     {
+        var payout = await _uow.PayoutRequests.GetByIdAsync(payoutId, ct)
+            ?? throw new KeyNotFoundException($"Payout {payoutId} not found.");
+
+        // Idempotency: duplicate PSP webhook — already completed
+        if (payout.Status == PayoutStatus.Completed)
+            return MapToDto(payout);
+
+        if (payout.Status != PayoutStatus.Processing)
+            throw new InvalidOperationException($"Only processing payouts can be completed. Current status: {payout.Status}.");
+
         await _uow.BeginTransactionAsync(ct);
         try
         {
-            var payout = await _uow.PayoutRequests.GetByIdAsync(payoutId, ct)
-                ?? throw new KeyNotFoundException($"Payout {payoutId} not found.");
-            if (payout.Status != PayoutStatus.Processing)
-                throw new InvalidOperationException($"Only processing payouts can be completed. Current status: {payout.Status}.");
-
             var wallet = await _uow.Wallets.GetByIdWithLockAsync(payout.WalletId, ct)
                 ?? throw new KeyNotFoundException($"Wallet {payout.WalletId} not found.");
 
@@ -328,6 +374,86 @@ public class PayoutService : IPayoutService
             _uow.PayoutRequests.Update(payout);
         }
         await _uow.SaveChangesAsync(ct);
+    }
+
+    // ── UC-AD-FIN-02: Schedule, Queue, Review ─────────────────────────────────
+
+    public async Task<PayoutRequestDto> SchedulePayoutAsync(Guid payoutId, DateTime scheduledUtc, CancellationToken ct = default)
+    {
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var payout = await _uow.PayoutRequests.GetByIdAsync(payoutId, ct)
+                ?? throw new KeyNotFoundException($"Payout {payoutId} not found.");
+
+            if (payout.Status != PayoutStatus.Approved)
+                throw new InvalidOperationException("Only approved payouts can be scheduled.");
+
+            payout.ScheduledAt = scheduledUtc;
+            payout.SarieWindowStatus = SarieWindowStatus.Queued;
+            payout.UpdatedAt = DateTime.UtcNow;
+            _uow.PayoutRequests.Update(payout);
+
+            await _audit.WriteAsync(new AuditLogRequest(
+                AuditEventType.Payout, "PAYOUT_SCHEDULED",
+                Guid.Empty, ActorRole.System,
+                payoutId, "PAYOUT", null,
+                JsonSerializer.Serialize(new { payoutId, scheduledUtc }),
+                null, null, null), ct);
+
+            await _uow.SaveChangesAsync(ct);
+            await _uow.CommitAsync(ct);
+            return MapToDto(payout);
+        }
+        catch { await _uow.RollbackAsync(ct); throw; }
+    }
+
+    public async Task<IEnumerable<PendingPayoutQueueItemDto>> GetPendingQueueAsync(CancellationToken ct = default)
+    {
+        var payouts = await _uow.PayoutRequests.GetPendingQueueOrderedAsync(ct);
+        var walletIds = payouts.Select(p => p.WalletId).Distinct();
+        var wallets = await _uow.Wallets.GetByIdsAsync(walletIds, ct);
+        var walletMap = wallets.ToDictionary(w => w.Id);
+
+        return payouts.Select(p =>
+        {
+            var w = walletMap.GetValueOrDefault(p.WalletId);
+            return new PendingPayoutQueueItemDto(
+                p.Id, p.ActorId, p.AmountRequested,
+                p.DestinationType, p.Status, p.SarieWindowStatus,
+                w?.KycStatus ?? KycStatus.Unverified,
+                w?.FraudScore ?? 0,
+                w?.IsInDunning ?? false,
+                w?.InstantPayTier ?? InstantPayTier.TierA,
+                (int)(DateTime.UtcNow - p.CreatedAt).TotalHours,
+                p.CreatedAt,
+                w?.BalanceAvailable ?? 0);
+        });
+    }
+
+    public async Task<PayoutReviewDto> GetPayoutReviewAsync(Guid payoutId, CancellationToken ct = default)
+    {
+        var payout = await _uow.PayoutRequests.GetByIdWithAccountAsync(payoutId, ct)
+            ?? throw new KeyNotFoundException($"Payout {payoutId} not found.");
+
+        var wallet = await _uow.Wallets.GetByIdAsync(payout.WalletId, ct)
+            ?? throw new KeyNotFoundException($"Wallet {payout.WalletId} not found.");
+
+        var account = payout.PayoutAccount;
+        return new PayoutReviewDto(
+            payout.Id, payout.ActorId,
+            payout.AmountRequested, payout.FeeAmount, payout.NetTransferAmount,
+            payout.DestinationType, payout.Status, payout.SarieWindowStatus,
+            payout.CreatedAt,
+            (int)(DateTime.UtcNow - payout.CreatedAt).TotalHours,
+            wallet.KycStatus, wallet.FraudScore, wallet.IsInDunning,
+            wallet.BalanceAvailable, wallet.BalancePending, wallet.BalanceHold,
+            account?.AccountIdentifier,
+            account?.AccountHolderName,
+            account?.VerificationStatus ?? KycStatus.Unverified,
+            payout.TransferReference,
+            payout.ApprovedByActorId, payout.ApprovedAt,
+            payout.RejectionReasonCode, payout.ScheduledAt);
     }
 
     // ── SARIE helpers ──────────────────────────────────────────────────────────

@@ -218,6 +218,10 @@ public class CashSettlementConfiguration : IEntityTypeConfiguration<CashSettleme
         builder.Property(s => s.TripIdsJson);
         builder.Property(s => s.Notes).HasMaxLength(500);
 
+        // UC-AD-FIN-03: city/zone filtering + fraud escalation
+        builder.Property(s => s.FraudCaseId).HasMaxLength(100);
+        builder.Property(s => s.LedgerTotal).HasPrecision(14, 2);
+
         builder.HasOne(s => s.Wallet)
             .WithMany()
             .HasForeignKey(s => s.WalletId)
@@ -225,6 +229,26 @@ public class CashSettlementConfiguration : IEntityTypeConfiguration<CashSettleme
 
         builder.HasIndex(s => s.DriverId);
         builder.HasIndex(s => s.Status);
+        builder.HasIndex(s => s.CityId);
+        builder.HasIndex(s => new { s.CreatedAt, s.CityId });
+    }
+}
+
+public class ReconciliationReportConfiguration : IEntityTypeConfiguration<ReconciliationReport>
+{
+    public void Configure(EntityTypeBuilder<ReconciliationReport> builder)
+    {
+        builder.ToTable("ReconciliationReports");
+        builder.HasKey(r => r.Id);
+
+        builder.Property(r => r.ReportDataJson).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(r => r.CsvContent).HasColumnType("nvarchar(max)");
+        builder.Property(r => r.TotalExpectedCash).HasPrecision(14, 2);
+        builder.Property(r => r.TotalReportedCash).HasPrecision(14, 2);
+        builder.Property(r => r.TotalVariance).HasPrecision(14, 2);
+
+        builder.HasIndex(r => new { r.DateFrom, r.DateTo, r.CityId });
+        builder.HasIndex(r => r.GeneratedAt);
     }
 }
 

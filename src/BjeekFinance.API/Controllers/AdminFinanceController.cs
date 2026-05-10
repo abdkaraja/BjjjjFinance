@@ -140,6 +140,22 @@ public class AdminFinanceController : ControllerBase
         return Ok(result);
     }
 
+    // ── Wallet Export ───────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// UC-AD-FIN-01: Export wallet data as CSV for selected actor type and city.
+    /// </summary>
+    [HttpGet("wallets/export")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    public async Task<IActionResult> ExportWallets(
+        [FromQuery] ActorType? actorType,
+        [FromQuery] Guid? cityId,
+        CancellationToken ct)
+    {
+        var csv = await _admin.ExportWalletsCsvAsync(actorType, cityId, ct);
+        return File(System.Text.Encoding.UTF8.GetBytes(csv), "text/csv", $"wallets-export-{DateTime.UtcNow:yyyyMMdd}.csv");
+    }
+
     // ── Finance Parameters ─────────────────────────────────────────────────────
 
     /// <summary>

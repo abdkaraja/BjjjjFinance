@@ -1,5 +1,6 @@
 using BjeekFinance.Application.Common;
 using BjeekFinance.Application.Interfaces;
+using BjeekFinance.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
@@ -64,30 +65,91 @@ public class PayoutsController : ControllerBase
     }
 
     /// <summary>
-    /// Finance Admin: approve a pending payout.
-    /// Above SAR 37,000 requires Super Admin — enforced via RBAC policy.
+    /// UC-AD-FIN-02: Pending payout queue sorted by amount descending then oldest first,
+    /// enriched with wallet KYC, fraud score, tier, and aging info.
+    /// </summary>
+    [HttpGet("pending-queue")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(IEnumerable<PendingPayoutQueueItemDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetPendingQueue(CancellationToken ct)
+    {
+        var result = await _payouts.GetPendingQueueAsync(ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// UC-AD-FIN-02: Detailed payout review for admin.
+    /// Returns destination account info, KYC status, wallet balances, and aging.
+    /// </summary>
+    [HttpGet("{payoutId:guid}/review")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(PayoutReviewDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Review(Guid payoutId, CancellationToken ct)
+    {
+        var result = await _payouts.GetPayoutReviewAsync(payoutId, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// UC-AD-FIN-02: Approve a pending payout.
+    /// Payouts above Super Admin threshold (SAR 10,000) require SuperAdmin role.
+    /// Set scheduleForNextWindow=true to queue for the next SARIE window.
     /// </summary>
     [HttpPost("{payoutId:guid}/approve")]
     [Authorize(Policy = "FinanceAdmin")]
     [ProducesResponseType(typeof(PayoutRequestDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> Approve(Guid payoutId, CancellationToken ct)
+    public async Task<IActionResult> Approve(Guid payoutId,
+        [FromBody] ApprovePayoutRequest req, CancellationToken ct)
     {
         var approverActorId = GetActorId();
-        var result = await _payouts.ApprovePayoutAsync(payoutId, approverActorId, ct);
+
+        // Check Super Admin threshold — enforced at controller level via role claim
+        var payout = await _payouts.GetByIdAsync(payoutId, ct);
+        var superAdminThreshold = 10_000m; // matches seed default; overridden in service via FinanceParameters
+        if (payout.AmountRequested > superAdminThreshold && !User.IsInRole("SuperAdmin"))
+            return Forbid();
+
+        var result = await _payouts.ApprovePayoutAsync(payoutId, approverActorId, req.ScheduleForNextWindow, ct);
         return Ok(result);
     }
 
-    /// <summary>Finance Admin: reject a pending payout with a reason code.</summary>
+    /// <summary>
+    /// UC-AD-FIN-02: Reject a pending payout with a predefined reason code.
+    /// Reason code must be from PayoutRejectionReasonCode enum.
+    /// Hold released back to available.
+    /// </summary>
     [HttpPost("{payoutId:guid}/reject")]
     [Authorize(Policy = "FinanceAdmin")]
     [ProducesResponseType(typeof(PayoutRequestDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<IActionResult> Reject(Guid payoutId,
         [FromBody] RejectPayoutRequest req, CancellationToken ct)
     {
+        if (!Enum.IsDefined(typeof(PayoutRejectionReasonCode), req.ReasonCode))
+            return BadRequest($"Invalid rejection reason code: {req.ReasonCode}. Must be one of: {string.Join(", ", Enum.GetNames<PayoutRejectionReasonCode>())}");
+
         var approverActorId = GetActorId();
         var result = await _payouts.RejectPayoutAsync(payoutId, approverActorId, req.ReasonCode, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// UC-AD-FIN-02: Schedule an approved payout for a future SARIE window.
+    /// Used when approving outside operating hours or when admin explicitly
+    /// wants to defer execution.
+    /// </summary>
+    [HttpPost("{payoutId:guid}/schedule")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(PayoutRequestDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Schedule(Guid payoutId,
+        [FromBody] SchedulePayoutRequest req, CancellationToken ct)
+    {
+        var result = await _payouts.SchedulePayoutAsync(payoutId, req.ScheduledUtc, ct);
         return Ok(result);
     }
 
@@ -137,5 +199,5 @@ public class PayoutsController : ControllerBase
         Guid.TryParse(User.FindFirst("sub")?.Value, out var id) ? id : Guid.Empty;
 }
 
-public record RejectPayoutRequest(string ReasonCode);
+public record RejectPayoutRequest(PayoutRejectionReasonCode ReasonCode);
 public record CompletePayoutRequest(string PspTransactionId, string TransferReference);

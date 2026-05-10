@@ -80,6 +80,18 @@ public class WalletRepository : Repository<Wallet>, IWalletRepository
             w.FraudScore < 50)
             .ToListAsync(ct);
     }
+
+    public async Task<IEnumerable<Wallet>> SearchWalletsAsync(Guid? actorId, ActorType? actorType, Guid? cityId, int skip, int take, CancellationToken ct = default)
+    {
+        var query = _set.AsQueryable();
+        if (actorId.HasValue) query = query.Where(w => w.ActorId == actorId.Value);
+        if (actorType.HasValue) query = query.Where(w => w.ActorType == actorType.Value);
+        if (cityId.HasValue) query = query.Where(w => w.CityId == cityId.Value);
+        return await query.OrderBy(w => w.ActorType).ThenBy(w => w.CreatedAt).Skip(skip).Take(take).ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<Wallet>> GetByIdsAsync(IEnumerable<Guid> walletIds, CancellationToken ct = default)
+        => await _set.Where(w => walletIds.Contains(w.Id)).ToListAsync(ct);
 }
 
 // ── Transaction Repository ─────────────────────────────────────────────────────
@@ -126,6 +138,15 @@ public class PayoutRequestRepository : Repository<PayoutRequest>, IPayoutRequest
 
     public async Task<IEnumerable<PayoutRequest>> GetAboveThresholdAsync(decimal threshold, CancellationToken ct = default)
         => await _set.Where(p => p.AmountRequested > threshold && p.Status == PayoutStatus.Pending).ToListAsync(ct);
+
+    public async Task<IEnumerable<PayoutRequest>> GetPendingQueueOrderedAsync(CancellationToken ct = default)
+        => await _set.Where(p => p.Status == PayoutStatus.Pending)
+            .OrderByDescending(p => p.AmountRequested)
+            .ThenBy(p => p.CreatedAt)
+            .ToListAsync(ct);
+
+    public async Task<PayoutRequest?> GetByIdWithAccountAsync(Guid payoutId, CancellationToken ct = default)
+        => await _set.Include(p => p.PayoutAccount).FirstOrDefaultAsync(p => p.Id == payoutId, ct);
 }
 
 // ── Instant Pay Repository ─────────────────────────────────────────────────────
@@ -238,6 +259,27 @@ public class CashSettlementRepository : Repository<CashSettlement>, ICashSettlem
 
     public async Task<CashSettlement?> GetPendingByDriverAsync(Guid driverId, CancellationToken ct = default)
         => await _set.FirstOrDefaultAsync(s => s.DriverId == driverId && s.Status == CashSettlementStatus.Submitted, ct);
+
+    public async Task<IEnumerable<CashSettlement>> GetByDateRangeAsync(DateTime from, DateTime to, Guid? cityId = null, CancellationToken ct = default)
+    {
+        var query = _set.Where(s => s.CreatedAt >= from && s.CreatedAt <= to);
+        if (cityId.HasValue) query = query.Where(s => s.CityId == cityId.Value);
+        return await query.OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
+    }
+}
+
+// ── Reconciliation Report Repository ────────────────────────────────────────────
+
+public class ReconciliationReportRepository : Repository<ReconciliationReport>, IReconciliationReportRepository
+{
+    public ReconciliationReportRepository(BjeekFinanceDbContext ctx) : base(ctx) { }
+
+    public async Task<IEnumerable<ReconciliationReport>> GetByDateRangeAsync(DateTime from, DateTime to, Guid? cityId = null, CancellationToken ct = default)
+    {
+        var query = _set.Where(r => r.DateFrom >= from && r.DateTo <= to);
+        if (cityId.HasValue) query = query.Where(r => r.CityId == cityId.Value);
+        return await query.OrderByDescending(r => r.GeneratedAt).ToListAsync(ct);
+    }
 }
 
 // ── Refund Repository ───────────────────────────────────────────────────────────
@@ -312,6 +354,7 @@ public class UnitOfWork : IUnitOfWork
     public ICorporateAccountRepository CorporateAccounts { get; }
     public IRefundRepository Refunds { get; }
     public ICashSettlementRepository CashSettlements { get; }
+    public IReconciliationReportRepository ReconciliationReports { get; }
     public IFinanceParameterRepository FinanceParameters { get; }
 
     public UnitOfWork(BjeekFinanceDbContext ctx)
@@ -326,6 +369,7 @@ public class UnitOfWork : IUnitOfWork
         CorporateAccounts = new CorporateAccountRepository(ctx);
         Refunds = new RefundRepository(ctx);
         CashSettlements = new CashSettlementRepository(ctx);
+        ReconciliationReports = new ReconciliationReportRepository(ctx);
         FinanceParameters = new FinanceParameterRepository(ctx);
     }
 

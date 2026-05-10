@@ -19,6 +19,7 @@ public class BjeekFinanceDbContext : DbContext
     public DbSet<FinanceParameter> FinanceParameters => Set<FinanceParameter>();
     public DbSet<Refund> Refunds => Set<Refund>();
     public DbSet<CashSettlement> CashSettlements => Set<CashSettlement>();
+    public DbSet<ReconciliationReport> ReconciliationReports => Set<ReconciliationReport>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
