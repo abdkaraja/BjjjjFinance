@@ -678,6 +678,39 @@ public record UpdateFraudRuleRequest(
 
 // ── UC-AD-FIN-04: VAT Report ───────────────────────────────────────────────────
 
+// ── UC-AD-FIN-06: Bulk Reconciliation Report ────────────────────────────────────
+
+public record BulkReconciliationReportDto(
+    Guid ReportId,
+    DateTime DateFrom,
+    DateTime DateTo,
+    Guid? CityId,
+    string? ServiceType,
+    decimal TotalGrossCollected,
+    decimal TotalDriverPayouts,
+    decimal TotalMerchantPayouts,
+    decimal TotalPlatformRevenue,
+    decimal TotalOutstandingReceivables,
+    decimal TotalHolds,
+    decimal TotalRefunds,
+    decimal TotalWriteOffs,
+    decimal ImbalanceAmount,
+    bool ImbalanceDetected,
+    bool AuditTamperDetected,
+    string ExportFormat,
+    Guid GeneratedByActorId,
+    DateTime GeneratedAt,
+    IEnumerable<BulkReconciliationLineDto> Lines
+);
+
+public record BulkReconciliationLineDto(
+    string Category,
+    string Subcategory,
+    decimal Amount,
+    int Count,
+    string? Notes
+);
+
 public record VatReportLineDto(
     string InvoiceId,
     DateTime TransactionDate,

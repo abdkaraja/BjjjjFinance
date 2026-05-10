@@ -376,6 +376,21 @@ public class RefundRepository : Repository<Refund>, IRefundRepository
             .SumAsync(r => r.Amount, ct);
 }
 
+// ── Bulk Reconciliation Report Repository ───────────────────────────────────────
+
+public class BulkReconciliationReportRepository : Repository<BulkReconciliationReport>, IBulkReconciliationReportRepository
+{
+    public BulkReconciliationReportRepository(BjeekFinanceDbContext ctx) : base(ctx) { }
+
+    public async Task<IEnumerable<BulkReconciliationReport>> GetByPeriodAsync(DateTime from, DateTime to, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default)
+    {
+        var query = _set.Where(r => r.DateFrom >= from && r.DateTo <= to);
+        if (cityId.HasValue) query = query.Where(r => r.CityId == cityId.Value);
+        if (!string.IsNullOrEmpty(serviceType)) query = query.Where(r => r.ServiceType == serviceType);
+        return await query.OrderByDescending(r => r.GeneratedAt).ToListAsync(ct);
+    }
+}
+
 // ── Finance Parameter Repository ───────────────────────────────────────────────
 
 public class FinanceParameterRepository : Repository<FinanceParameter>, IFinanceParameterRepository
@@ -435,6 +450,7 @@ public class UnitOfWork : IUnitOfWork
     public IVatReportRepository VatReports { get; }
     public IFraudRuleRepository FraudRules { get; }
     public IFraudCaseRepository FraudCases { get; }
+    public IBulkReconciliationReportRepository BulkReconciliationReports { get; }
     public IFinanceParameterRepository FinanceParameters { get; }
 
     public UnitOfWork(BjeekFinanceDbContext ctx)
@@ -453,6 +469,7 @@ public class UnitOfWork : IUnitOfWork
         VatReports = new VatReportRepository(ctx);
         FraudRules = new FraudRuleRepository(ctx);
         FraudCases = new FraudCaseRepository(ctx);
+        BulkReconciliationReports = new BulkReconciliationReportRepository(ctx);
         FinanceParameters = new FinanceParameterRepository(ctx);
     }
 

@@ -197,6 +197,15 @@ public interface IAdminFinanceService
     Task<IEnumerable<AuditLogEntryDto>> GetAuditLogsAsync(Guid subjectId, string subjectType, CancellationToken ct = default);
     Task<IEnumerable<AuditLogEntryDto>> GetAuditLogsByEventTypeAsync(AuditEventType eventType, DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default);
 
+    /// <summary>UC-AD-FIN-06: Generate bulk platform reconciliation report.</summary>
+    Task<BulkReconciliationReportDto> GenerateBulkReconciliationReportAsync(DateTime from, DateTime to, Guid? cityId, string? serviceType, Guid adminId, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-06: List previously generated bulk reconciliation reports.</summary>
+    Task<IEnumerable<BulkReconciliationReportDto>> GetBulkReconciliationReportsAsync(DateTime from, DateTime to, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default);
+
+    /// <summary>UC-AD-FIN-06: Download bulk reconciliation report CSV.</summary>
+    Task<string> GetBulkReconciliationReportCsvAsync(Guid reportId, CancellationToken ct = default);
+
     Task<ReconciliationReportDto> GenerateReconciliationReportAsync(DateTimeOffset from, DateTimeOffset to, CancellationToken ct = default);
 
     /// <summary>UC-AD-FIN-01: Export wallet data as CSV for selected actor type, city.</summary>

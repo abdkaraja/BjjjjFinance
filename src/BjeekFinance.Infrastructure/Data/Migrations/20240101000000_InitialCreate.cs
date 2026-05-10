@@ -494,6 +494,39 @@ public partial class InitialCreate : Migration
         migrationBuilder.CreateIndex("IX_FraudCases_Severity", "FraudCases", "Severity");
         migrationBuilder.CreateIndex("IX_FraudCases_Status_Severity", "FraudCases", new[] { "Status", "Severity" });
 
+        // ── BulkReconciliationReports (UC-AD-FIN-06) ──────────────────────────
+        migrationBuilder.CreateTable(
+            name: "BulkReconciliationReports",
+            columns: table => new
+            {
+                Id = table.Column<Guid>(nullable: false),
+                DateFrom = table.Column<DateTime>(nullable: false),
+                DateTo = table.Column<DateTime>(nullable: false),
+                CityId = table.Column<Guid>(nullable: true),
+                ServiceType = table.Column<string>(maxLength: 50, nullable: true),
+                TotalGrossCollected = table.Column<decimal>(type: "decimal(14,2)", nullable: false, defaultValue: 0m),
+                TotalDriverPayouts = table.Column<decimal>(type: "decimal(14,2)", nullable: false, defaultValue: 0m),
+                TotalMerchantPayouts = table.Column<decimal>(type: "decimal(14,2)", nullable: false, defaultValue: 0m),
+                TotalPlatformRevenue = table.Column<decimal>(type: "decimal(14,2)", nullable: false, defaultValue: 0m),
+                TotalOutstandingReceivables = table.Column<decimal>(type: "decimal(14,2)", nullable: false, defaultValue: 0m),
+                TotalHolds = table.Column<decimal>(type: "decimal(14,2)", nullable: false, defaultValue: 0m),
+                TotalRefunds = table.Column<decimal>(type: "decimal(14,2)", nullable: false, defaultValue: 0m),
+                TotalWriteOffs = table.Column<decimal>(type: "decimal(14,2)", nullable: false, defaultValue: 0m),
+                ImbalanceAmount = table.Column<decimal>(type: "decimal(14,2)", nullable: false, defaultValue: 0m),
+                ImbalanceDetected = table.Column<bool>(nullable: false, defaultValue: false),
+                AuditTamperDetected = table.Column<bool>(nullable: false, defaultValue: false),
+                ReportDataJson = table.Column<string>(type: "nvarchar(max)", nullable: false),
+                CsvContent = table.Column<string>(type: "nvarchar(max)", nullable: true),
+                ExportFormat = table.Column<string>(maxLength: 10, nullable: false, defaultValue: "CSV"),
+                GeneratedByActorId = table.Column<Guid>(nullable: false),
+                GeneratedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()"),
+                CreatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()"),
+                UpdatedAt = table.Column<DateTime>(nullable: false, defaultValueSql: "GETUTCDATE()")
+            },
+            constraints: table => table.PrimaryKey("PK_BulkReconciliationReports", x => x.Id));
+        migrationBuilder.CreateIndex("IX_BulkReconciliationReports_DateRange", "BulkReconciliationReports", new[] { "DateFrom", "DateTo", "CityId", "ServiceType" });
+        migrationBuilder.CreateIndex("IX_BulkReconciliationReports_GeneratedAt", "BulkReconciliationReports", "GeneratedAt");
+
         // ── Seed default fraud rules ───────────────────────────────────────────
         var fraudSystemId = Guid.Parse("00000000-0000-0000-0000-000000000001");
         var fraudSeedNow = new DateTime(2024, 1, 1, 0, 0, 0, DateTimeKind.Utc);
@@ -544,7 +577,8 @@ public partial class InitialCreate : Migration
             ("courtesy_credit_monthly_cap",       "100",     "Maximum courtesy credit issuable per customer per month in SAR"),
             ("write_off_finance_manager_limit",   "18500",   "Write-offs below this SAR amount are Finance Manager self-approve"),
             ("bulk_adjustment_super_admin_limit", "50000",   "Bulk adjustments above this SAR total require Super Admin"),
-            ("cash_settlement_variance_threshold", "3",      "Cash settlement variance threshold in SAR — ≤ this auto-adjusts, > this flags for review")
+            ("cash_settlement_variance_threshold", "3",      "Cash settlement variance threshold in SAR — ≤ this auto-adjusts, > this flags for review"),
+            ("reconciliation_imbalance_threshold", "1",      "Bulk reconciliation imbalance threshold in SAR — > this triggers alert")
         };
 
         foreach (var (key, value, description) in parameters)
@@ -568,6 +602,7 @@ public partial class InitialCreate : Migration
     {
         migrationBuilder.DropTable("FraudCases");
         migrationBuilder.DropTable("FraudRules");
+        migrationBuilder.DropTable("BulkReconciliationReports");
         migrationBuilder.DropTable("VatReports");
         migrationBuilder.DropTable("ReconciliationReports");
         migrationBuilder.DropTable("CashSettlements");

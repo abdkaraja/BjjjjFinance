@@ -160,6 +160,174 @@ public class AdminFinanceService : IAdminFinanceService
             Enumerable.Empty<ReconciliationLineDto>(), DateTime.UtcNow);
     }
 
+    public async Task<BulkReconciliationReportDto> GenerateBulkReconciliationReportAsync(DateTime from, DateTime to, Guid? cityId, string? serviceType, Guid adminId, CancellationToken ct = default)
+    {
+        // Step 1: Check audit log tamper hashes
+        var tamperFailures = await _uow.AuditLogs.GetHashValidationFailuresAsync(ct);
+        var auditTampered = tamperFailures.Any();
+
+        // Step 2: Fetch all transactions in period
+        var allTxns = await _uow.Transactions.GetByDateRangeWithWalletAsync(from, to, serviceType, ct);
+
+        // Step 3: Filter by city if specified (transaction's wallet.CityId)
+        if (cityId.HasValue)
+            allTxns = allTxns.Where(t => t.Wallet.CityId == cityId.Value).ToList();
+
+        // Step 4: Compute gross collected
+        var totalGrossCollected = allTxns.Sum(t => t.GrossAmount);
+        var totalCommission = allTxns.Sum(t => t.CommissionAmount);
+        var totalVat = allTxns.Sum(t => t.VatAmount);
+        var totalFleetFees = allTxns.Sum(t => t.FleetFeeAmount);
+        var totalPenalties = allTxns.Sum(t => t.PenaltyAmount);
+        var totalPlatformRevenue = totalCommission + totalVat + totalFleetFees + totalPenalties;
+
+        // Step 5: Fetch all completed payouts in period
+        var allPayouts = await _uow.PayoutRequests.GetAllAsync(ct);
+        var periodPayouts = allPayouts.Where(p => p.CreatedAt >= from && p.CreatedAt <= to && p.Status == PayoutStatus.Completed);
+
+        // Filter by city via wallet lookup
+        var payoutWalletIds = periodPayouts.Select(p => p.WalletId).Distinct().ToList();
+        var payoutWallets = await _uow.Wallets.GetByIdsAsync(payoutWalletIds, ct);
+        var payoutWalletMap = payoutWallets.ToDictionary(w => w.Id);
+
+        if (cityId.HasValue)
+            periodPayouts = periodPayouts.Where(p =>
+                payoutWalletMap.TryGetValue(p.WalletId, out var w) && w.CityId == cityId.Value);
+
+        var totalDriverPayouts = periodPayouts
+            .Where(p => payoutWalletMap.TryGetValue(p.WalletId, out var w) && w.ActorType == ActorType.Driver)
+            .Sum(p => p.AmountRequested);
+        var totalMerchantPayouts = periodPayouts
+            .Where(p => payoutWalletMap.TryGetValue(p.WalletId, out var w) && w.ActorType == ActorType.Merchant)
+            .Sum(p => p.AmountRequested);
+
+        // Step 6: Fetch wallet snapshot data
+        var allWallets = await _uow.Wallets.GetAllAsync(ct);
+        if (cityId.HasValue)
+            allWallets = allWallets.Where(w => w.CityId == cityId.Value).ToList();
+
+        var totalOutstandingReceivables = allWallets.Sum(w => w.CashReceivable);
+        var totalHolds = allWallets.Sum(w => w.BalanceHold);
+
+        // Step 7: Fetch completed refunds in period
+        var allRefunds = await _uow.Refunds.GetAllAsync(ct);
+        var totalRefunds = allRefunds
+            .Where(r => r.CreatedAt >= from && r.CreatedAt <= to && r.Status == RefundStatus.Completed)
+            .Sum(r => r.Amount);
+
+        // Step 8: Reconciliation formula
+        var rightSide = totalDriverPayouts + totalMerchantPayouts + totalPlatformRevenue
+                        + totalOutstandingReceivables + totalHolds;
+        var imbalanceAmount = totalGrossCollected - rightSide;
+        var imbalanceThreshold = await _uow.FinanceParameters.GetDecimalAsync("reconciliation_imbalance_threshold", 1m, cityId, null, ct);
+        var imbalanceDetected = Math.Abs(imbalanceAmount) > imbalanceThreshold;
+
+        // Step 9: Build lines
+        var lines = new List<BulkReconciliationLineDto>
+        {
+            new("Revenue", "Gross Collected", totalGrossCollected, allTxns.Count(), "All transactions in period"),
+            new("Revenue", "Platform Commission", totalCommission, allTxns.Count(t => t.CommissionAmount > 0), "Commission charged per transaction"),
+            new("Revenue", "VAT Collected", totalVat, allTxns.Count(t => t.VatAmount > 0), "VAT at ZATCA rate"),
+            new("Revenue", "Fleet Fees", totalFleetFees, allTxns.Count(t => t.FleetFeeAmount > 0), "Fleet/partner fees"),
+            new("Revenue", "Penalties", totalPenalties, allTxns.Count(t => t.PenaltyAmount > 0), "Penalty/chargeback fees"),
+            new("Payouts", "Driver Payouts", totalDriverPayouts, periodPayouts.Count(), "Completed driver payouts"),
+            new("Payouts", "Merchant Payouts", totalMerchantPayouts, periodPayouts.Count(), "Completed merchant payouts"),
+            new("Balance Sheet", "Outstanding Receivables", totalOutstandingReceivables, allWallets.Count(w => w.CashReceivable > 0), "Cash commission owed by drivers"),
+            new("Balance Sheet", "Active Holds", totalHolds, allWallets.Count(w => w.BalanceHold > 0), "Admin/dunning holds on wallets"),
+            new("Adjustments", "Refunds", totalRefunds, allRefunds.Count(r => r.CreatedAt >= from && r.CreatedAt <= to), "Completed refunds in period"),
+            new("Imbalance", "Net Imbalance", imbalanceAmount, 0, imbalanceDetected ? "ALERT: exceeds threshold" : "In balance")
+        };
+
+        var reportDataJson = JsonSerializer.Serialize(lines);
+        var csvContent = BuildBulkReconciliationCsv(from, to, lines);
+
+        // Step 10: Create and persist report
+        var report = new BulkReconciliationReport
+        {
+            DateFrom = from,
+            DateTo = to,
+            CityId = cityId,
+            ServiceType = serviceType,
+            TotalGrossCollected = totalGrossCollected,
+            TotalDriverPayouts = totalDriverPayouts,
+            TotalMerchantPayouts = totalMerchantPayouts,
+            TotalPlatformRevenue = totalPlatformRevenue,
+            TotalOutstandingReceivables = totalOutstandingReceivables,
+            TotalHolds = totalHolds,
+            TotalRefunds = totalRefunds,
+            TotalWriteOffs = 0,
+            ImbalanceAmount = imbalanceAmount,
+            ImbalanceDetected = imbalanceDetected,
+            AuditTamperDetected = auditTampered,
+            ReportDataJson = reportDataJson,
+            CsvContent = csvContent,
+            ExportFormat = "CSV",
+            GeneratedByActorId = adminId,
+            GeneratedAt = DateTime.UtcNow
+        };
+        await _uow.BulkReconciliationReports.AddAsync(report, ct);
+
+        // Step 11: Immutable audit log
+        await _audit.WriteAsync(new AuditLogRequest(
+            AuditEventType.AdminOverride, "BULK_RECONCILIATION_GENERATED",
+            adminId, ActorRole.FinanceAdmin,
+            report.Id, "BULK_RECONCILIATION_REPORT", null,
+            JsonSerializer.Serialize(new
+            {
+                from, to, cityId, serviceType,
+                totalGrossCollected, totalDriverPayouts, totalMerchantPayouts,
+                totalPlatformRevenue, imbalanceAmount, imbalanceDetected, auditTampered
+            }),
+            cityId, null, null), ct);
+
+        await _uow.SaveChangesAsync(ct);
+
+        return MapBulkReportToDto(report, lines);
+    }
+
+    public async Task<IEnumerable<BulkReconciliationReportDto>> GetBulkReconciliationReportsAsync(DateTime from, DateTime to, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default)
+    {
+        var reports = await _uow.BulkReconciliationReports.GetByPeriodAsync(from, to, cityId, serviceType, ct);
+        return reports.Select(r =>
+        {
+            var lines = JsonSerializer.Deserialize<List<BulkReconciliationLineDto>>(r.ReportDataJson) ?? new List<BulkReconciliationLineDto>();
+            return MapBulkReportToDto(r, lines);
+        });
+    }
+
+    public async Task<string> GetBulkReconciliationReportCsvAsync(Guid reportId, CancellationToken ct = default)
+    {
+        var report = await _uow.BulkReconciliationReports.GetByIdAsync(reportId, ct)
+            ?? throw new KeyNotFoundException($"Bulk reconciliation report {reportId} not found.");
+        return report.CsvContent ?? string.Empty;
+    }
+
+    private static BulkReconciliationReportDto MapBulkReportToDto(BulkReconciliationReport r, IEnumerable<BulkReconciliationLineDto> lines) => new(
+        r.Id, r.DateFrom, r.DateTo, r.CityId, r.ServiceType,
+        r.TotalGrossCollected, r.TotalDriverPayouts, r.TotalMerchantPayouts,
+        r.TotalPlatformRevenue, r.TotalOutstandingReceivables, r.TotalHolds,
+        r.TotalRefunds, r.TotalWriteOffs, r.ImbalanceAmount, r.ImbalanceDetected,
+        r.AuditTamperDetected, r.ExportFormat, r.GeneratedByActorId, r.GeneratedAt, lines);
+
+    private static string BuildBulkReconciliationCsv(DateTime from, DateTime to, List<BulkReconciliationLineDto> lines)
+    {
+        // QuickBooks/Xero-compatible CSV format: Date, Transaction Type, Document Number, Name, Amount, Memo/Description
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("Date,Transaction Type,Document Number,Name,Amount,Description");
+        foreach (var line in lines)
+        {
+            var date = from.ToString("yyyy-MM-dd");
+            var type = line.Category;
+            var name = line.Subcategory;
+            var amount = line.Amount.ToString("F2");
+            var desc = (line.Notes ?? "").Replace("\"", "\"\"");
+            sb.AppendLine($"{date},{type},,{name},{amount},\"{desc}\"");
+        }
+        sb.AppendLine();
+        sb.AppendLine($"Generated,{DateTime.UtcNow:O}");
+        return sb.ToString();
+    }
+
     public async Task<FinanceParameterDto> GetParameterAsync(string key, Guid? cityId, string? serviceType, CancellationToken ct = default)
     {
         var param = await _uow.FinanceParameters.GetActiveAsync(key, cityId, serviceType, ct)

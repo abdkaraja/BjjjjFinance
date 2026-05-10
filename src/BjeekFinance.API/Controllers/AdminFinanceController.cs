@@ -211,6 +211,55 @@ public class AdminFinanceController : ControllerBase
         return File(Encoding.UTF8.GetBytes(csv), "text/csv", $"vat-report-{reportId:N[..8]}-{DateTime.UtcNow:yyyyMMdd}.csv");
     }
 
+    // ── UC-AD-FIN-06: Bulk Platform Reconciliation ──────────────────────────────
+
+    /// <summary>
+    /// UC-AD-FIN-06: Generate bulk platform reconciliation report.
+    /// Verifies: Total Gross Collected = Driver Payouts + Merchant Payouts + Platform Revenue + Outstanding Receivables + Holds.
+    /// Imbalance > SAR 1 triggers alert. Tamper check on audit logs.
+    /// CSV export in QuickBooks/Xero-compatible format.
+    /// </summary>
+    [HttpPost("bulk-reconciliation")]
+    [Authorize(Policy = "FinanceManager")]
+    [ProducesResponseType(typeof(BulkReconciliationReportDto), StatusCodes.Status201Created)]
+    public async Task<IActionResult> GenerateBulkReconciliation(
+        [FromQuery] DateTime from,
+        [FromQuery] DateTime to,
+        [FromQuery] Guid? cityId,
+        [FromQuery] string? serviceType,
+        CancellationToken ct)
+    {
+        var adminId = GetActorId();
+        var result = await _admin.GenerateBulkReconciliationReportAsync(from, to, cityId, serviceType, adminId, ct);
+        return CreatedAtAction(nameof(GetBulkReconciliationReports), new { from, to }, result);
+    }
+
+    /// <summary>List previously generated bulk reconciliation reports by period.</summary>
+    [HttpGet("bulk-reconciliation")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(IEnumerable<BulkReconciliationReportDto>), StatusCodes.Status200OK)]
+    public async Task<IActionResult> GetBulkReconciliationReports(
+        [FromQuery] DateTime from,
+        [FromQuery] DateTime to,
+        [FromQuery] Guid? cityId,
+        [FromQuery] string? serviceType,
+        CancellationToken ct)
+    {
+        var result = await _admin.GetBulkReconciliationReportsAsync(from, to, cityId, serviceType, ct);
+        return Ok(result);
+    }
+
+    /// <summary>Download bulk reconciliation report CSV by report ID.</summary>
+    [HttpGet("bulk-reconciliation/{reportId:guid}/csv")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> DownloadBulkReconciliationCsv(Guid reportId, CancellationToken ct)
+    {
+        var csv = await _admin.GetBulkReconciliationReportCsvAsync(reportId, ct);
+        return File(Encoding.UTF8.GetBytes(csv), "text/csv", $"bulk-reconciliation-{reportId:N[..8]}-{DateTime.UtcNow:yyyyMMdd}.csv");
+    }
+
     // ── Finance Parameters ─────────────────────────────────────────────────────
 
     /// <summary>

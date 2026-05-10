@@ -155,6 +155,11 @@ public interface IReconciliationReportRepository : IRepository<ReconciliationRep
     Task<IEnumerable<ReconciliationReport>> GetByDateRangeAsync(DateTime from, DateTime to, Guid? cityId = null, CancellationToken ct = default);
 }
 
+public interface IBulkReconciliationReportRepository : IRepository<BulkReconciliationReport>
+{
+    Task<IEnumerable<BulkReconciliationReport>> GetByPeriodAsync(DateTime from, DateTime to, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default);
+}
+
 public interface IFinanceParameterRepository : IRepository<FinanceParameter>
 {
     Task<FinanceParameter?> GetActiveAsync(string key, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default);
@@ -177,6 +182,7 @@ public interface IUnitOfWork : IAsyncDisposable
     IVatReportRepository VatReports { get; }
     IFraudRuleRepository FraudRules { get; }
     IFraudCaseRepository FraudCases { get; }
+    IBulkReconciliationReportRepository BulkReconciliationReports { get; }
     IFinanceParameterRepository FinanceParameters { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);

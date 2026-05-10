@@ -23,6 +23,7 @@ public class BjeekFinanceDbContext : DbContext
     public DbSet<VatReport> VatReports => Set<VatReport>();
     public DbSet<FraudRule> FraudRules => Set<FraudRule>();
     public DbSet<FraudCase> FraudCases => Set<FraudCase>();
+    public DbSet<BulkReconciliationReport> BulkReconciliationReports => Set<BulkReconciliationReport>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

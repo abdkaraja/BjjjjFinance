@@ -416,6 +416,32 @@ public class CorporateInvoiceConfiguration : IEntityTypeConfiguration<CorporateI
     }
 }
 
+public class BulkReconciliationReportConfiguration : IEntityTypeConfiguration<BulkReconciliationReport>
+{
+    public void Configure(EntityTypeBuilder<BulkReconciliationReport> builder)
+    {
+        builder.ToTable("BulkReconciliationReports");
+        builder.HasKey(r => r.Id);
+
+        builder.Property(r => r.TotalGrossCollected).HasPrecision(14, 2);
+        builder.Property(r => r.TotalDriverPayouts).HasPrecision(14, 2);
+        builder.Property(r => r.TotalMerchantPayouts).HasPrecision(14, 2);
+        builder.Property(r => r.TotalPlatformRevenue).HasPrecision(14, 2);
+        builder.Property(r => r.TotalOutstandingReceivables).HasPrecision(14, 2);
+        builder.Property(r => r.TotalHolds).HasPrecision(14, 2);
+        builder.Property(r => r.TotalRefunds).HasPrecision(14, 2);
+        builder.Property(r => r.TotalWriteOffs).HasPrecision(14, 2);
+        builder.Property(r => r.ImbalanceAmount).HasPrecision(14, 2);
+        builder.Property(r => r.ReportDataJson).HasColumnType("nvarchar(max)").IsRequired();
+        builder.Property(r => r.CsvContent).HasColumnType("nvarchar(max)");
+        builder.Property(r => r.ServiceType).HasMaxLength(50);
+        builder.Property(r => r.ExportFormat).HasMaxLength(10).HasDefaultValue("CSV");
+
+        builder.HasIndex(r => new { r.DateFrom, r.DateTo, r.CityId, r.ServiceType });
+        builder.HasIndex(r => r.GeneratedAt);
+    }
+}
+
 public class FinanceParameterConfiguration : IEntityTypeConfiguration<FinanceParameter>
 {
     public void Configure(EntityTypeBuilder<FinanceParameter> builder)

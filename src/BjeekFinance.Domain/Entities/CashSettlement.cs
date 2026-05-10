@@ -131,3 +131,65 @@ public class ReconciliationReport : BaseEntity
     /// <summary>Timestamp when report was generated.</summary>
     public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>
+/// UC-AD-FIN-06: Bulk platform reconciliation report.
+/// Reconciles Total Gross Collected against Driver Payouts + Merchant Payouts +
+/// Platform Revenue + Outstanding Receivables + Holds.
+/// Imbalance > SAR 1 triggers automatic alert. Tamper-checked against audit logs.
+/// CSV export compatible with QuickBooks/Xero standard chart of accounts.
+/// </summary>
+public class BulkReconciliationReport : BaseEntity
+{
+    public DateTime DateFrom { get; set; }
+    public DateTime DateTo { get; set; }
+    public Guid? CityId { get; set; }
+    public string? ServiceType { get; set; }
+
+    /// <summary>Sum of all transaction GrossAmount in period.</summary>
+    public decimal TotalGrossCollected { get; set; }
+
+    /// <summary>Sum of completed PayoutRequests.AmountRequested for Driver wallets.</summary>
+    public decimal TotalDriverPayouts { get; set; }
+
+    /// <summary>Sum of completed PayoutRequests.AmountRequested for Merchant wallets.</summary>
+    public decimal TotalMerchantPayouts { get; set; }
+
+    /// <summary>Platform revenue = Commission + VAT + Fleet Fees + Penalties.</summary>
+    public decimal TotalPlatformRevenue { get; set; }
+
+    /// <summary>Sum of Wallet.CashReceivable at report generation time.</summary>
+    public decimal TotalOutstandingReceivables { get; set; }
+
+    /// <summary>Sum of Wallet.BalanceHold at report generation time.</summary>
+    public decimal TotalHolds { get; set; }
+
+    /// <summary>Sum of completed refund amounts in period.</summary>
+    public decimal TotalRefunds { get; set; }
+
+    /// <summary>Sum of all write-off amounts in period.</summary>
+    public decimal TotalWriteOffs { get; set; }
+
+    /// <summary>Calculated: GrossCollected − (DriverPayouts + MerchantPayouts + PlatformRevenue + OutstandingReceivables + Holds).</summary>
+    public decimal ImbalanceAmount { get; set; }
+
+    /// <summary>True when |ImbalanceAmount| > SAR 1 threshold.</summary>
+    public bool ImbalanceDetected { get; set; }
+
+    /// <summary>True when audit log hash chain has failures.</summary>
+    public bool AuditTamperDetected { get; set; }
+
+    /// <summary>JSON blob: summary and detail line items.</summary>
+    public string ReportDataJson { get; set; } = string.Empty;
+
+    /// <summary>CSV content in QuickBooks/Xero-compatible format.</summary>
+    public string? CsvContent { get; set; }
+
+    /// <summary>Export format: CSV (PDF/Excel placeholder).</summary>
+    public string ExportFormat { get; set; } = "CSV";
+
+    /// <summary>Admin who generated this report.</summary>
+    public Guid GeneratedByActorId { get; set; }
+
+    public DateTime GeneratedAt { get; set; } = DateTime.UtcNow;
+}
