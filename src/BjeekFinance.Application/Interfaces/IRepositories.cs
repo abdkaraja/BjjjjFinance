@@ -100,6 +100,13 @@ public interface IRefundRepository : IRepository<Refund>
     Task<decimal> GetTotalRefundedAmountAsync(Guid originalTransactionId, CancellationToken ct = default);
 }
 
+public interface ICashSettlementRepository : IRepository<CashSettlement>
+{
+    Task<IEnumerable<CashSettlement>> GetByDriverAsync(Guid driverId, CancellationToken ct = default);
+    Task<IEnumerable<CashSettlement>> GetFlaggedForReviewAsync(CancellationToken ct = default);
+    Task<CashSettlement?> GetPendingByDriverAsync(Guid driverId, CancellationToken ct = default);
+}
+
 public interface IFinanceParameterRepository : IRepository<FinanceParameter>
 {
     Task<FinanceParameter?> GetActiveAsync(string key, Guid? cityId = null, string? serviceType = null, CancellationToken ct = default);
@@ -117,6 +124,7 @@ public interface IUnitOfWork : IAsyncDisposable
     IAuditLogRepository AuditLogs { get; }
     ICorporateAccountRepository CorporateAccounts { get; }
     IRefundRepository Refunds { get; }
+    ICashSettlementRepository CashSettlements { get; }
     IFinanceParameterRepository FinanceParameters { get; }
 
     Task<int> SaveChangesAsync(CancellationToken ct = default);

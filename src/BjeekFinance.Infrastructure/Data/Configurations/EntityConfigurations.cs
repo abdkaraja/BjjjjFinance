@@ -203,6 +203,31 @@ public class RefundConfiguration : IEntityTypeConfiguration<Refund>
     }
 }
 
+public class CashSettlementConfiguration : IEntityTypeConfiguration<CashSettlement>
+{
+    public void Configure(EntityTypeBuilder<CashSettlement> builder)
+    {
+        builder.ToTable("CashSettlements");
+        builder.HasKey(s => s.Id);
+
+        builder.Property(s => s.ExpectedCashTotal).HasPrecision(12, 2).IsRequired();
+        builder.Property(s => s.ReportedCashTotal).HasPrecision(12, 2).IsRequired();
+        builder.Property(s => s.VarianceAmount).HasPrecision(12, 2).IsRequired();
+        builder.Property(s => s.CommissionReceivableAmount).HasPrecision(12, 2).IsRequired();
+        builder.Property(s => s.Status).HasConversion<string>().HasMaxLength(20).IsRequired();
+        builder.Property(s => s.TripIdsJson);
+        builder.Property(s => s.Notes).HasMaxLength(500);
+
+        builder.HasOne(s => s.Wallet)
+            .WithMany()
+            .HasForeignKey(s => s.WalletId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.HasIndex(s => s.DriverId);
+        builder.HasIndex(s => s.Status);
+    }
+}
+
 public class AuditLogEntryConfiguration : IEntityTypeConfiguration<AuditLogEntry>
 {
     public void Configure(EntityTypeBuilder<AuditLogEntry> builder)

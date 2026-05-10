@@ -76,6 +76,11 @@ public class WalletService : IWalletService
                 && wallet.KycStatus != KycStatus.Verified)
                 throw new KycNotVerifiedException();
 
+            // Dunning gate: driver/delivery/merchant wallets in HoldPayout+ cannot be debited
+            if (wallet.ActorType is ActorType.Driver or ActorType.Delivery or ActorType.Merchant
+                && wallet.IsInDunning && wallet.DunningBucket >= Domain.Enums.DunningBucket.HoldPayout)
+                throw new DunningHoldException(new(wallet.DunningBucket.ToString()!, wallet.DunningStartedAt!.Value));
+
             var before = SerializeState(wallet);
 
             if (wallet.ActorType == ActorType.User)

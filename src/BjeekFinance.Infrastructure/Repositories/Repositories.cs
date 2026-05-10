@@ -76,6 +76,7 @@ public class WalletRepository : Repository<Wallet>, IWalletRepository
             w.InstantPayEnabled &&
             w.KycStatus == KycStatus.Verified &&
             w.InstantPayTier != InstantPayTier.TierA &&
+            !w.IsInDunning &&
             w.FraudScore < 50)
             .ToListAsync(ct);
     }
@@ -223,6 +224,22 @@ public class CorporateAccountRepository : Repository<CorporateAccount>, ICorpora
             .Where(i => !i.IsPaid && i.DueDate < DateTime.UtcNow).ToListAsync(ct);
 }
 
+// ── Cash Settlement Repository ──────────────────────────────────────────────────
+
+public class CashSettlementRepository : Repository<CashSettlement>, ICashSettlementRepository
+{
+    public CashSettlementRepository(BjeekFinanceDbContext ctx) : base(ctx) { }
+
+    public async Task<IEnumerable<CashSettlement>> GetByDriverAsync(Guid driverId, CancellationToken ct = default)
+        => await _set.Where(s => s.DriverId == driverId).OrderByDescending(s => s.CreatedAt).ToListAsync(ct);
+
+    public async Task<IEnumerable<CashSettlement>> GetFlaggedForReviewAsync(CancellationToken ct = default)
+        => await _set.Where(s => s.VarianceFlag && s.Status == CashSettlementStatus.FlaggedForReview).ToListAsync(ct);
+
+    public async Task<CashSettlement?> GetPendingByDriverAsync(Guid driverId, CancellationToken ct = default)
+        => await _set.FirstOrDefaultAsync(s => s.DriverId == driverId && s.Status == CashSettlementStatus.Submitted, ct);
+}
+
 // ── Refund Repository ───────────────────────────────────────────────────────────
 
 public class RefundRepository : Repository<Refund>, IRefundRepository
@@ -294,6 +311,7 @@ public class UnitOfWork : IUnitOfWork
     public IAuditLogRepository AuditLogs { get; }
     public ICorporateAccountRepository CorporateAccounts { get; }
     public IRefundRepository Refunds { get; }
+    public ICashSettlementRepository CashSettlements { get; }
     public IFinanceParameterRepository FinanceParameters { get; }
 
     public UnitOfWork(BjeekFinanceDbContext ctx)
@@ -307,6 +325,7 @@ public class UnitOfWork : IUnitOfWork
         AuditLogs = new AuditLogRepository(ctx);
         CorporateAccounts = new CorporateAccountRepository(ctx);
         Refunds = new RefundRepository(ctx);
+        CashSettlements = new CashSettlementRepository(ctx);
         FinanceParameters = new FinanceParameterRepository(ctx);
     }
 

@@ -1,0 +1,197 @@
+using BjeekFinance.Application.Common;
+using BjeekFinance.Application.Interfaces;
+using BjeekFinance.Domain.Entities;
+using BjeekFinance.Domain.Enums;
+using System.Text.Json;
+
+namespace BjeekFinance.Application.Services;
+
+/// <summary>
+/// UC-FIN-CASH-01: Cash ride/order settlement.
+/// Records expected cash from COD trips, accepts driver-reported cash,
+/// computes variance, auto-adjusts ≤ SAR 3, flags > SAR 3 for admin review.
+/// On completion: cash_receivable cleared, AVAILABLE adjusted.
+/// </summary>
+public class CashSettlementService : ICashSettlementService
+{
+    private readonly IUnitOfWork _uow;
+    private readonly IAuditService _audit;
+
+    public CashSettlementService(IUnitOfWork uow, IAuditService audit)
+    {
+        _uow = uow;
+        _audit = audit;
+    }
+
+    private const decimal VarianceThreshold = 3m;
+
+    public async Task<CashSettlementDto> SubmitSettlementAsync(SubmitCashSettlementRequest req, CancellationToken ct = default)
+    {
+        // ── 1. Validate no pending settlement exists ──────────────────────────
+        var existing = await _uow.CashSettlements.GetPendingByDriverAsync(req.DriverId, ct);
+        if (existing is not null)
+            throw new InvalidOperationException(
+                $"Driver {req.DriverId} already has a pending settlement ({existing.Id}). Complete or cancel it first.");
+
+        // ── 2. Load wallet ────────────────────────────────────────────────────
+        var wallet = await _uow.Wallets.GetByIdWithLockAsync(req.WalletId, ct)
+            ?? throw new KeyNotFoundException($"Wallet {req.WalletId} not found.");
+
+        var variance = req.ReportedCashTotal - req.ExpectedCashTotal;
+        var isFlagged = Math.Abs(variance) > VarianceThreshold;
+
+        var status = isFlagged
+            ? CashSettlementStatus.FlaggedForReview
+            : CashSettlementStatus.Submitted;
+
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            // ── 3. If variance ≤ SAR 3: auto-adjust ledger ───────────────────
+            if (!isFlagged)
+            {
+                // Clear cash_receivable (expected commission already deducted from AVAILABLE)
+                var receivableBefore = wallet.CashReceivable;
+                wallet.CashReceivable -= req.CommissionReceivableAmount;
+                if (wallet.CashReceivable < 0) wallet.CashReceivable = 0;
+
+                // Record the actual cash collected difference in AVAILABLE
+                // If variance is negative (shortfall), driver owes more → reduce AVAILABLE
+                // If variance is positive (surplus), driver gets credit → increase AVAILABLE
+                wallet.BalanceAvailable += variance;
+                wallet.UpdatedAt = DateTime.UtcNow;
+                _uow.Wallets.Update(wallet);
+
+                status = CashSettlementStatus.AutoAdjusted;
+            }
+            else
+            {
+                // Flagged: hold the cash_receivable as-is pending admin review
+                // No wallet changes until admin resolves
+                wallet.UpdatedAt = DateTime.UtcNow;
+                _uow.Wallets.Update(wallet);
+            }
+
+            // ── 4. Create settlement record ───────────────────────────────────
+            var settlement = new CashSettlement
+            {
+                DriverId = req.DriverId,
+                WalletId = req.WalletId,
+                ExpectedCashTotal = req.ExpectedCashTotal,
+                ReportedCashTotal = req.ReportedCashTotal,
+                VarianceAmount = variance,
+                CommissionReceivableAmount = req.CommissionReceivableAmount,
+                Status = status,
+                VarianceFlag = isFlagged,
+                TripIdsJson = req.TripIdsJson,
+                Notes = req.Notes,
+                CompletedAt = isFlagged ? null : DateTime.UtcNow
+            };
+            await _uow.CashSettlements.AddAsync(settlement, ct);
+
+            // ── 5. Audit log ──────────────────────────────────────────────────
+            await _audit.WriteAsync(new AuditLogRequest(
+                AuditEventType.CashSettlement,
+                isFlagged ? "CASH_SETTLEMENT_FLAGGED" : "CASH_SETTLEMENT_AUTO_ADJUSTED",
+                req.DriverId, ActorRole.Driver,
+                settlement.Id, "CASH_SETTLEMENT",
+                JsonSerializer.Serialize(new
+                {
+                    expected = req.ExpectedCashTotal,
+                    reported = req.ReportedCashTotal,
+                    variance,
+                    receivableBefore = wallet.CashReceivable + req.CommissionReceivableAmount
+                }),
+                JsonSerializer.Serialize(new
+                {
+                    settlementId = settlement.Id,
+                    status = status.ToString(),
+                    varianceFlag = isFlagged,
+                    cashReceivableAfter = wallet.CashReceivable
+                }),
+                null, null, null), ct);
+
+            await _uow.SaveChangesAsync(ct);
+            await _uow.CommitAsync(ct);
+
+            return MapToDto(settlement);
+        }
+        catch { await _uow.RollbackAsync(ct); throw; }
+    }
+
+    public async Task<CashSettlementDto> ReviewSettlementAsync(Guid settlementId, Guid adminId, string resolutionNotes, CancellationToken ct = default)
+    {
+        var settlement = await _uow.CashSettlements.GetByIdAsync(settlementId, ct)
+            ?? throw new KeyNotFoundException($"Cash settlement {settlementId} not found.");
+
+        if (settlement.Status != CashSettlementStatus.FlaggedForReview)
+            throw new InvalidOperationException($"Settlement is not flagged for review. Current status: {settlement.Status}.");
+
+        var wallet = await _uow.Wallets.GetByIdWithLockAsync(settlement.WalletId, ct)!;
+
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            // Admin resolves: clear cash_receivable and adjust AVAILABLE for variance
+            wallet!.CashReceivable -= settlement.CommissionReceivableAmount;
+            if (wallet.CashReceivable < 0) wallet.CashReceivable = 0;
+
+            wallet.BalanceAvailable += settlement.VarianceAmount;
+            wallet.UpdatedAt = DateTime.UtcNow;
+            _uow.Wallets.Update(wallet);
+
+            settlement.Status = CashSettlementStatus.Completed;
+            settlement.ReviewedByActorId = adminId;
+            settlement.ReviewedAt = DateTime.UtcNow;
+            settlement.CompletedAt = DateTime.UtcNow;
+            settlement.Notes = resolutionNotes;
+            _uow.CashSettlements.Update(settlement);
+
+            await _audit.WriteAsync(new AuditLogRequest(
+                AuditEventType.CashSettlement, "CASH_SETTLEMENT_REVIEWED",
+                adminId, ActorRole.FinanceAdmin,
+                settlement.Id, "CASH_SETTLEMENT",
+                null,
+                JsonSerializer.Serialize(new
+                {
+                    settlementId,
+                    variance = settlement.VarianceAmount,
+                    resolutionNotes,
+                    cashReceivableAfter = wallet.CashReceivable
+                }),
+                null, null, null), ct);
+
+            await _uow.SaveChangesAsync(ct);
+            await _uow.CommitAsync(ct);
+
+            return MapToDto(settlement);
+        }
+        catch { await _uow.RollbackAsync(ct); throw; }
+    }
+
+    public async Task<CashSettlementDto> GetSettlementAsync(Guid settlementId, CancellationToken ct = default)
+    {
+        var settlement = await _uow.CashSettlements.GetByIdAsync(settlementId, ct)
+            ?? throw new KeyNotFoundException($"Cash settlement {settlementId} not found.");
+        return MapToDto(settlement);
+    }
+
+    public async Task<IEnumerable<CashSettlementDto>> GetByDriverAsync(Guid driverId, CancellationToken ct = default)
+    {
+        var settlements = await _uow.CashSettlements.GetByDriverAsync(driverId, ct);
+        return settlements.Select(MapToDto);
+    }
+
+    public async Task<IEnumerable<CashSettlementDto>> GetFlaggedForReviewAsync(CancellationToken ct = default)
+    {
+        var settlements = await _uow.CashSettlements.GetFlaggedForReviewAsync(ct);
+        return settlements.Select(MapToDto);
+    }
+
+    private static CashSettlementDto MapToDto(CashSettlement s) => new(
+        s.Id, s.DriverId, s.WalletId,
+        s.ExpectedCashTotal, s.ReportedCashTotal, s.VarianceAmount,
+        s.CommissionReceivableAmount, s.Status, s.VarianceFlag,
+        s.TripIdsJson, s.Notes, s.ReviewedByActorId,
+        s.ReviewedAt, s.CompletedAt, s.CreatedAt);
+}

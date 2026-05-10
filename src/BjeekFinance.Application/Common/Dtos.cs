@@ -442,6 +442,36 @@ public record EmployeeBudgetDto(
 
 public record DunningBucketInfo(string Bucket, DateTime Since);
 
+// ── Cash Settlement DTOs (UC-FIN-CASH-01) ───────────────────────────────────────
+
+public record SubmitCashSettlementRequest(
+    Guid DriverId,
+    Guid WalletId,
+    decimal ExpectedCashTotal,
+    decimal ReportedCashTotal,
+    decimal CommissionReceivableAmount,
+    string? TripIdsJson,
+    string? Notes
+);
+
+public record CashSettlementDto(
+    Guid SettlementId,
+    Guid DriverId,
+    Guid WalletId,
+    decimal ExpectedCashTotal,
+    decimal ReportedCashTotal,
+    decimal VarianceAmount,
+    decimal CommissionReceivableAmount,
+    CashSettlementStatus Status,
+    bool VarianceFlag,
+    string? TripIdsJson,
+    string? Notes,
+    Guid? ReviewedByActorId,
+    DateTime? ReviewedAt,
+    DateTime? CompletedAt,
+    DateTime CreatedAt
+);
+
 // ── Refund DTOs (UC-FIN-REFUND-01) ──────────────────────────────────────────────
 
 public record InitiateRefundRequest(

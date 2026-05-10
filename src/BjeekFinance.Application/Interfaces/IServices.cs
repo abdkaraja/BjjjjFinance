@@ -234,6 +234,27 @@ public interface IRefundService
     Task<IEnumerable<RefundDto>> GetRefundsByActorAsync(Guid actorId, CancellationToken ct = default);
 }
 
+// ── Cash Settlement Service (UC-FIN-CASH-01) ────────────────────────────────────
+
+public interface ICashSettlementService
+{
+    /// <summary>
+    /// UC-FIN-CASH-01: Driver submits daily cash settlement.
+    /// System compares expected vs reported cash per trip.
+    /// |Variance| ≤ SAR 3 → auto-adjust ledger.
+    /// |Variance| > SAR 3 → flagged for Finance Admin review.
+    /// On settlement completion: cash_receivable cleared.
+    /// </summary>
+    Task<CashSettlementDto> SubmitSettlementAsync(SubmitCashSettlementRequest request, CancellationToken ct = default);
+
+    /// <summary>Finance Admin reviews and resolves a flagged settlement.</summary>
+    Task<CashSettlementDto> ReviewSettlementAsync(Guid settlementId, Guid adminId, string resolutionNotes, CancellationToken ct = default);
+
+    Task<CashSettlementDto> GetSettlementAsync(Guid settlementId, CancellationToken ct = default);
+    Task<IEnumerable<CashSettlementDto>> GetByDriverAsync(Guid driverId, CancellationToken ct = default);
+    Task<IEnumerable<CashSettlementDto>> GetFlaggedForReviewAsync(CancellationToken ct = default);
+}
+
 // ── KYC / Payout Account Service ──────────────────────────────────────────────
 
 public interface IKycService

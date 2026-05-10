@@ -389,6 +389,8 @@ public class InstantPayService : IInstantPayService
             return Fail("KYC not verified.", wallet);
         if (wallet.FraudScore >= 50)
             return Fail("Account suspended pending fraud review.", wallet);
+        if (wallet.IsInDunning && wallet.DunningBucket >= Domain.Enums.DunningBucket.HoldPayout)
+            return Fail("Wallet is in dunning hold. Payouts and cashouts are suspended.", wallet);
         if (wallet.InstantPayTier == InstantPayTier.TierA)
             return Fail("Tier A accounts are not eligible for manual cashout (Tier 2).", wallet);
 

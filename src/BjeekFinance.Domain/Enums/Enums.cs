@@ -158,6 +158,15 @@ public enum FraudCaseStatus
     FalsePositive
 }
 
+public enum CashSettlementStatus
+{
+    Pending,
+    Submitted,
+    AutoAdjusted,
+    FlaggedForReview,
+    Completed
+}
+
 public enum WriteOffReasonCode
 {
     BadDebtDriverDeparted,
