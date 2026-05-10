@@ -72,6 +72,7 @@ public partial class InitialCreate : Migration
                 BalanceAvailable = table.Column<decimal>(type: "decimal(12,2)", nullable: false, defaultValue: 0m),
                 BalancePending = table.Column<decimal>(type: "decimal(12,2)", nullable: false, defaultValue: 0m),
                 BalanceHold = table.Column<decimal>(type: "decimal(12,2)", nullable: false, defaultValue: 0m),
+                PendingSince = table.Column<DateTime>(nullable: true),
                 CashReceivable = table.Column<decimal>(type: "decimal(12,2)", nullable: false, defaultValue: 0m),
                 BalanceRefundCredit = table.Column<decimal>(type: "decimal(12,2)", nullable: false, defaultValue: 0m),
                 BalancePromoCredit = table.Column<decimal>(type: "decimal(12,2)", nullable: false, defaultValue: 0m),

@@ -182,6 +182,26 @@ public class AdminFinanceController : ControllerBase
         return Ok(result);
     }
 
+    // ── Chargebacks ────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Process a chargeback/dispute reversal.
+    /// Reduces PENDING first if still unsettled, otherwise reduces AVAILABLE.
+    /// If AVAILABLE insufficient, remainder becomes dunning receivable.
+    /// </summary>
+    [HttpPost("chargebacks")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> ProcessChargeback([FromBody] ChargebackRequest req, CancellationToken ct)
+    {
+        var walletService = HttpContext.RequestServices.GetRequiredService<IWalletService>();
+        await walletService.ProcessChargebackAsync(req.WalletId, req.Amount, req.TransactionId, ct);
+        return NoContent();
+    }
+
     private Guid GetActorId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value, out var id) ? id : Guid.Empty;
 }
+
+public record ChargebackRequest(Guid WalletId, decimal Amount, Guid TransactionId);

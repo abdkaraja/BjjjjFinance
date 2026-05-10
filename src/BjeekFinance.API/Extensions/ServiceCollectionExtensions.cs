@@ -1,3 +1,4 @@
+using BjeekFinance.API.BackgroundServices;
 using BjeekFinance.Application.Interfaces;
 using BjeekFinance.Application.Services;
 using BjeekFinance.Infrastructure.Data;
@@ -22,6 +23,9 @@ public static class ServiceCollectionExtensions
         services.AddScoped<ICorporateBillingService, CorporateBillingService>();
         services.AddScoped<IAuditService, AuditService>();
         services.AddScoped<IKycService, KycService>();
+
+        // Background service: auto-settles pending earnings after 15-minute window
+        services.AddHostedService<PendingEarningsSettlementService>();
         return services;
     }
 

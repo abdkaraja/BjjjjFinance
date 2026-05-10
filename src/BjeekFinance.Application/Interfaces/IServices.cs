@@ -28,8 +28,28 @@ public interface IWalletService
     /// <summary>Promote PENDING balance to AVAILABLE after 15-minute settlement window.</summary>
     Task SettlePendingEarningsAsync(Guid walletId, CancellationToken ct = default);
 
+    /// <summary>
+    /// Batch settlement: finds all wallets with pending earnings older than the configured
+    /// settlement window and promotes their PENDING balance to AVAILABLE.
+    /// Called by the background hosted service every minute.
+    /// </summary>
+    Task SettlePendingForAllEligibleWalletsAsync(CancellationToken ct = default);
+
     /// <summary>Record cash commission receivable — reduces AVAILABLE immediately.</summary>
     Task RecordCashCommissionReceivableAsync(Guid walletId, decimal commissionAmount, CancellationToken ct = default);
+
+    /// <summary>
+    /// Collect cash commission from driver — reduces CashReceivable and restores AVAILABLE.
+    /// Called when driver settles outstanding cash commission (e.g., at cash collection point).
+    /// </summary>
+    Task CollectCashCommissionAsync(Guid walletId, decimal amount, CancellationToken ct = default);
+
+    /// <summary>
+    /// Process a chargeback / dispute reversal.
+    /// If earnings are still PENDING, reduces PENDING. Otherwise reduces AVAILABLE.
+    /// If AVAILABLE is insufficient, creates a negative receivable (dunning).
+    /// </summary>
+    Task ProcessChargebackAsync(Guid walletId, decimal amount, Guid transactionId, CancellationToken ct = default);
 
     Task<IEnumerable<WalletSummaryDto>> GetWalletsByActorTypeAsync(ActorType actorType, CancellationToken ct = default);
 }

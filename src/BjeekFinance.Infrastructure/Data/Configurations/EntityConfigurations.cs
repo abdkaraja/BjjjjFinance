@@ -23,6 +23,7 @@ public class WalletConfiguration : IEntityTypeConfiguration<Wallet>
         builder.Property(w => w.BalanceRefundCredit).HasPrecision(12, 2).IsRequired();
         builder.Property(w => w.BalancePromoCredit).HasPrecision(12, 2).IsRequired();
         builder.Property(w => w.BalanceCourtesyCredit).HasPrecision(12, 2).IsRequired();
+        builder.Property(w => w.PendingSince);
         builder.Property(w => w.AutoCashoutThreshold).HasPrecision(12, 2);
 
         builder.Property(w => w.KycStatus).HasConversion<string>().HasMaxLength(20);

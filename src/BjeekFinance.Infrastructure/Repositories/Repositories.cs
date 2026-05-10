@@ -53,9 +53,16 @@ public class WalletRepository : Repository<Wallet>, IWalletRepository
 
     public async Task<Wallet?> GetByIdWithLockAsync(Guid walletId, CancellationToken ct = default)
     {
-        // SQL Server: row-level lock via UPDLOCK hint (requires raw SQL or interceptor)
-        // Simplified: standard Find — real impl uses FromSqlRaw("SELECT ... WITH (UPDLOCK)")
-        return await _set.FindAsync([walletId], ct);
+        return await _set.FromSqlRaw(
+            "SELECT * FROM Wallets WITH (UPDLOCK, ROWLOCK) WHERE Id = {0}", walletId)
+            .FirstOrDefaultAsync(ct);
+    }
+
+    public async Task<IEnumerable<Wallet>> GetWalletsWithPendingOlderThanAsync(int minutes, CancellationToken ct = default)
+    {
+        var cutoff = DateTime.UtcNow.AddMinutes(-minutes);
+        return await _set.Where(w => w.BalancePending > 0 && w.PendingSince != null && w.PendingSince <= cutoff)
+            .ToListAsync(ct);
     }
 }
 
@@ -81,6 +88,9 @@ public class TransactionRepository : Repository<Transaction>, ITransactionReposi
 
     public async Task<IEnumerable<Transaction>> GetByOrderAsync(Guid orderId, CancellationToken ct = default)
         => await _set.Where(t => t.OrderId == orderId).ToListAsync(ct);
+
+    public async Task<int> GetByActorCountAsync(Guid actorId, CancellationToken ct = default)
+        => await _set.CountAsync(t => t.Wallet.ActorId == actorId, ct);
 }
 
 // ── Payout Request Repository ──────────────────────────────────────────────────

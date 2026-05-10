@@ -28,6 +28,12 @@ public class Wallet : BaseEntity
     /// </summary>
     public decimal BalancePending { get; set; } = 0;
 
+    /// <summary>
+    /// Timestamp of the oldest pending earnings batch.
+    /// Used to enforce the 15-minute settlement window. Null when BalancePending is 0.
+    /// </summary>
+    public DateTime? PendingSince { get; set; }
+
     /// <summary>Admin-locked or dunning-held amount.</summary>
     public decimal BalanceHold { get; set; } = 0;
 

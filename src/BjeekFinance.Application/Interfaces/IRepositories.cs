@@ -24,6 +24,12 @@ public interface IWalletRepository : IRepository<Wallet>
     /// Saga-pattern atomic balance writes (SRS-FIN-001 §UC-FIN-COLLECT-01).
     /// </summary>
     Task<Wallet?> GetByIdWithLockAsync(Guid walletId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Returns wallets whose PENDING balance has aged past the specified minutes threshold.
+    /// Used by the background settlement service to auto-settle earnings.
+    /// </summary>
+    Task<IEnumerable<Wallet>> GetWalletsWithPendingOlderThanAsync(int minutes, CancellationToken ct = default);
 }
 
 public interface ITransactionRepository : IRepository<Transaction>
@@ -32,6 +38,7 @@ public interface ITransactionRepository : IRepository<Transaction>
     Task<IEnumerable<Transaction>> GetByWalletAsync(Guid walletId, DateTimeOffset? from = null, DateTimeOffset? to = null, CancellationToken ct = default);
     Task<IEnumerable<Transaction>> GetByRideAsync(Guid rideId, CancellationToken ct = default);
     Task<IEnumerable<Transaction>> GetByOrderAsync(Guid orderId, CancellationToken ct = default);
+    Task<int> GetByActorCountAsync(Guid actorId, CancellationToken ct = default);
 }
 
 public interface IPayoutRequestRepository : IRepository<PayoutRequest>

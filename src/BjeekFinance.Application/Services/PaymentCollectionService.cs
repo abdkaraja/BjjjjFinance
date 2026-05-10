@@ -81,6 +81,9 @@ public class PaymentCollectionService : IPaymentCollectionService
             else
             {
                 // Digital: net earnings enter PENDING — move to AVAILABLE after 15-min window
+                // Track PendingSince: set when first pending earnings batch is recorded
+                if (driverWallet.BalancePending == 0)
+                    driverWallet.PendingSince = DateTime.UtcNow;
                 driverWallet.BalancePending += netDriverAmount;
                 deltas.Add(new WalletDeltaDto(driverWallet.Id, driverWallet.ActorType,
                     netDriverAmount, "Net earnings (pending settlement)"));

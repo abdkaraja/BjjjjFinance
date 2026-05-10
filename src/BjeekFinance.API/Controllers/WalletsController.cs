@@ -95,9 +95,26 @@ public class WalletsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// Collect cash commission from driver.
+    /// Reduces CashReceivable and restores AVAILABLE balance.
+    /// </summary>
+    [HttpPost("{walletId:guid}/collect-cash-commission")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(StatusCodes.Status204NoContent)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> CollectCashCommission(Guid walletId,
+        [FromBody] CashCommissionRequest req, CancellationToken ct)
+    {
+        await _wallets.CollectCashCommissionAsync(walletId, req.Amount, ct);
+        return NoContent();
+    }
+
     private Guid GetActorId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value, out var id) ? id : Guid.Empty;
 }
 
 public record AdminCorrectionRequest(decimal CorrectionAmount, string Reason);
 public record HoldRequest(decimal Amount, string Reason);
+public record CashCommissionRequest(decimal Amount);

@@ -355,12 +355,48 @@ public class InstantPayService : IInstantPayService
 
     public async Task RecalculateTiersAsync(CancellationToken ct = default)
     {
-        // Nightly job: promote/demote wallets based on trip count, rating, fraud flags
+        // Nightly job: promote/demote wallets based on trip count, fraud flags
         // All thresholds admin-configurable — never hardcoded
         var tierATripThreshold = await _uow.FinanceParameters.GetIntAsync("instant_pay_tier_a_trips", 50, null, ct);
         var tierCTripThreshold = await _uow.FinanceParameters.GetIntAsync("instant_pay_tier_c_trips", 500, null, ct);
-        // Real impl: query driver profiles, apply rules, batch update wallet tiers
-        await Task.CompletedTask;
+
+        // Fetch all driver/delivery wallets with sufficient trip history
+        // Promotion: TierA → TierB (≥50 trips), TierB → TierC (≥500 trips)
+        // Demotion: TierC → TierB (fraud ≥30 or dunning)
+        //           TierB → TierA (fraud ≥50 or dunning HoldPayout+)
+        var wallets = await _uow.Wallets.GetAllAsync(ct);
+        var allDriverWallets = wallets.Where(w =>
+            w.ActorType is ActorType.Driver or ActorType.Delivery);
+
+        foreach (var wallet in allDriverWallets)
+        {
+            var tripCount = await _uow.Transactions.GetByActorCountAsync(wallet.ActorId, ct);
+            var tier = wallet.InstantPayTier;
+
+            // Demotion rules first (safety over speed)
+            if (tier == InstantPayTier.TierC && (wallet.FraudScore >= 30 || wallet.IsInDunning))
+                tier = InstantPayTier.TierB;
+
+            if (tier == InstantPayTier.TierB && (wallet.FraudScore >= 50 ||
+                (wallet.IsInDunning && wallet.DunningBucket >= Domain.Enums.DunningBucket.HoldPayout)))
+                tier = InstantPayTier.TierA;
+
+            // Promotion rules
+            if (tier == InstantPayTier.TierA && tripCount >= tierATripThreshold && wallet.FraudScore < 50)
+                tier = InstantPayTier.TierB;
+
+            if (tier == InstantPayTier.TierB && tripCount >= tierCTripThreshold && wallet.FraudScore < 30 && !wallet.IsInDunning)
+                tier = InstantPayTier.TierC;
+
+            if (wallet.InstantPayTier != tier)
+            {
+                wallet.InstantPayTier = tier;
+                wallet.UpdatedAt = DateTime.UtcNow;
+                _uow.Wallets.Update(wallet);
+            }
+        }
+
+        await _uow.SaveChangesAsync(ct);
     }
 
     public async Task RevokeInstantPayAsync(Guid walletId, string reasonCode, string estimatedResolution, Guid adminId, CancellationToken ct = default)
