@@ -71,6 +71,11 @@ public class WalletService : IWalletService
             if (wallet.FraudScore >= 80)
                 throw new WalletFrozenException();
 
+            // KYC gate: driver/delivery/merchant wallets must be verified before debit
+            if (wallet.ActorType is ActorType.Driver or ActorType.Delivery or ActorType.Merchant
+                && wallet.KycStatus != KycStatus.Verified)
+                throw new KycNotVerifiedException();
+
             var before = SerializeState(wallet);
 
             if (wallet.ActorType == ActorType.User)

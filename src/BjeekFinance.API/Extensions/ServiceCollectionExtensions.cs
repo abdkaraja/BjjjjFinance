@@ -3,6 +3,7 @@ using BjeekFinance.Application.Interfaces;
 using BjeekFinance.Application.Services;
 using BjeekFinance.Infrastructure.Data;
 using BjeekFinance.Infrastructure.Repositories;
+using BjeekFinance.Infrastructure.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -15,6 +16,7 @@ public static class ServiceCollectionExtensions
 {
     public static IServiceCollection AddApplicationServices(this IServiceCollection services)
     {
+        services.AddScoped<IEncryptionService, AesEncryptionService>();
         services.AddScoped<IWalletService, WalletService>();
         services.AddScoped<IPaymentCollectionService, PaymentCollectionService>();
         services.AddScoped<IPayoutService, PayoutService>();

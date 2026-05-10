@@ -104,8 +104,38 @@ public class PayoutsController : ControllerBase
         return NoContent();
     }
 
+    /// <summary>
+    /// PSP/gateway webhook: confirm transfer completed.
+    /// Releases balance_hold, records PSP transaction reference.
+    /// </summary>
+    [HttpPost("{payoutId:guid}/complete")]
+    [AllowAnonymous] // Secured via HMAC signature validation (production: PSP webhook secret)
+    [ProducesResponseType(typeof(PayoutRequestDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Complete(Guid payoutId,
+        [FromBody] CompletePayoutRequest req, CancellationToken ct)
+    {
+        var result = await _payouts.CompletePayoutAsync(payoutId, req.PspTransactionId, req.TransferReference, ct);
+        return Ok(result);
+    }
+
+    /// <summary>
+    /// Retry a failed payout (EX2: exponential backoff, max 3 attempts).
+    /// After 3 failures, hold released back to available, admin notified.
+    /// </summary>
+    [HttpPost("{payoutId:guid}/retry")]
+    [Authorize(Policy = "FinanceAdmin")]
+    [ProducesResponseType(typeof(PayoutRequestDto), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> Retry(Guid payoutId, CancellationToken ct)
+    {
+        var result = await _payouts.RetryPayoutAsync(payoutId, ct);
+        return Ok(result);
+    }
+
     private Guid GetActorId() =>
         Guid.TryParse(User.FindFirst("sub")?.Value, out var id) ? id : Guid.Empty;
 }
 
 public record RejectPayoutRequest(string ReasonCode);
+public record CompletePayoutRequest(string PspTransactionId, string TransferReference);

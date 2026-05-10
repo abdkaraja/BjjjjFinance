@@ -45,6 +45,9 @@ public class WalletRepository : Repository<Wallet>, IWalletRepository
     public async Task<Wallet?> GetByActorAsync(Guid actorId, ActorType actorType, CancellationToken ct = default)
         => await _set.FirstOrDefaultAsync(w => w.ActorId == actorId && w.ActorType == actorType, ct);
 
+    public async Task<IEnumerable<Wallet>> GetByActorOnlyAsync(Guid actorId, CancellationToken ct = default)
+        => await _set.Where(w => w.ActorId == actorId).ToListAsync(ct);
+
     public async Task<IEnumerable<Wallet>> GetWalletsInDunningAsync(CancellationToken ct = default)
         => await _set.Where(w => w.IsInDunning).ToListAsync(ct);
 
@@ -62,6 +65,18 @@ public class WalletRepository : Repository<Wallet>, IWalletRepository
     {
         var cutoff = DateTime.UtcNow.AddMinutes(-minutes);
         return await _set.Where(w => w.BalancePending > 0 && w.PendingSince != null && w.PendingSince <= cutoff)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<Wallet>> GetWalletsWithAutoCashoutEnabledAsync(CancellationToken ct = default)
+    {
+        return await _set.Where(w =>
+            w.AutoCashoutThreshold != null &&
+            w.BalanceAvailable >= w.AutoCashoutThreshold!.Value &&
+            w.InstantPayEnabled &&
+            w.KycStatus == KycStatus.Verified &&
+            w.InstantPayTier != InstantPayTier.TierA &&
+            w.FraudScore < 50)
             .ToListAsync(ct);
     }
 }
@@ -131,6 +146,9 @@ public class InstantPayRepository : Repository<InstantPayCashout>, IInstantPayRe
             && i.CityLocalTime >= weekStart
             && i.TransferStatus != PayoutStatus.Failed)
             .SumAsync(i => i.AmountRequested, ct);
+
+    public async Task<InstantPayCashout?> GetByPayoutRequestIdAsync(Guid payoutRequestId, CancellationToken ct = default)
+        => await _set.FirstOrDefaultAsync(i => i.PayoutRequestId == payoutRequestId, ct);
 }
 
 // ── Payout Account Repository ──────────────────────────────────────────────────

@@ -155,6 +155,11 @@ public class InstantPayCashoutConfiguration : IEntityTypeConfiguration<InstantPa
 
         builder.HasIndex(i => i.ActorId);
         builder.HasIndex(i => new { i.ActorId, i.CityLocalTime });
+
+        builder.HasOne(i => i.PayoutRequest)
+            .WithMany()
+            .HasForeignKey(i => i.PayoutRequestId)
+            .OnDelete(DeleteBehavior.SetNull);
     }
 }
 

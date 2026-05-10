@@ -102,18 +102,20 @@ public class KycService : IKycService
 {
     private readonly IUnitOfWork _uow;
     private readonly IAuditService _audit;
+    private readonly IEncryptionService _encryption;
 
-    public KycService(IUnitOfWork uow, IAuditService audit)
+    public KycService(IUnitOfWork uow, IAuditService audit, IEncryptionService encryption)
     {
         _uow = uow;
         _audit = audit;
+        _encryption = encryption;
     }
 
     public async Task<PayoutAccountDto> AddPayoutAccountAsync(AddPayoutAccountRequest req, CancellationToken ct = default)
     {
-        // IBAN: validate format (24-char SA) and SAMA registry at save time
         if (req.DestinationType == PayoutDestinationType.SaudiIban)
         {
+            // IBAN: validate format (24-char SA) and SAMA registry at save time
             if (!IsValidIbanFormat(req.AccountIdentifier))
                 throw new Domain.Exceptions.IbanValidationException();
 
@@ -126,12 +128,20 @@ public class KycService : IKycService
                 throw new InvalidOperationException("This IBAN is already registered to another account. Fraud flag raised.");
         }
 
+        if (req.DestinationType == PayoutDestinationType.StcPay)
+        {
+            if (!IsValidSaudiMobileNumber(req.AccountIdentifier))
+                throw new ArgumentException("STC Pay mobile number must be a valid Saudi mobile number (e.g., 05xxxxxxxx).");
+        }
+
+        // AES-256 encrypt AccountIdentifier before storage
+        var encryptedIdentifier = _encryption.Encrypt(req.AccountIdentifier, req.ActorId.ToString());
+
         var account = new PayoutAccount
         {
             ActorId = req.ActorId,
             DestinationType = req.DestinationType,
-            // In production: AES-256 encrypt AccountIdentifier before storage
-            AccountIdentifier = req.AccountIdentifier,
+            AccountIdentifier = encryptedIdentifier,
             AccountHolderName = req.AccountHolderName,
             VerificationStatus = KycStatus.Pending,
             KycDocumentReferences = JsonSerializer.Serialize(req.KycDocumentReferences)
@@ -167,6 +177,16 @@ public class KycService : IKycService
         var account = await _uow.PayoutAccounts.GetByIdAsync(payload.AccountId, ct)
             ?? throw new KeyNotFoundException($"Payout account {payload.AccountId} not found.");
 
+        // State-machine enforcement: only Pending status can transition
+        if (account.VerificationStatus != KycStatus.Pending)
+            throw new InvalidOperationException(
+                $"KYC status transition from {account.VerificationStatus} to {payload.Status} is not allowed. " +
+                "Only Pending accounts can transition to Verified or Rejected.");
+
+        // Rejected cannot transition to Verified (must re-submit from scratch)
+        if (payload.Status is not KycStatus.Verified and not KycStatus.Rejected)
+            throw new InvalidOperationException($"Invalid KYC target status: {payload.Status}. Only Verified or Rejected are allowed.");
+
         var before = account.VerificationStatus;
         account.VerificationStatus = payload.Status;
         account.RejectionReason = payload.RejectionReason;
@@ -174,9 +194,16 @@ public class KycService : IKycService
 
         if (payload.Status == KycStatus.Verified)
         {
-            // Link payout_account_id to wallet
-            var wallets = await _uow.PayoutAccounts.GetByActorAsync(account.ActorId, ct);
-            // real impl: update wallet.PayoutAccountId
+            // Link payout_account_id to all actor wallets + sync KycStatus
+            var wallets = await _uow.Wallets.GetByActorOnlyAsync(account.ActorId, ct);
+
+            foreach (var wallet in wallets)
+            {
+                wallet.PayoutAccountId = account.Id;
+                wallet.KycStatus = KycStatus.Verified;
+                wallet.UpdatedAt = DateTime.UtcNow;
+                _uow.Wallets.Update(wallet);
+            }
         }
 
         _uow.PayoutAccounts.Update(account);
@@ -195,14 +222,25 @@ public class KycService : IKycService
 
     public Task<bool> ValidateIbanAsync(string iban, CancellationToken ct = default)
     {
-        // Real impl: call SAMA National IBAN Registry API
-        // Stub: format validation only
+        // TODO: Replace stub with real SAMA National IBAN Registry API call
+        //   - Add HttpClient with exponential backoff retry (Polly)
+        //   - Cache registry results per bank code (TTL: 24 hours)
+        //   - Handle API unreachable: log warning, allow pass-through with audit flag
         return Task.FromResult(IsValidIbanFormat(iban));
     }
 
     private static bool IsValidIbanFormat(string iban) =>
         iban.Length == 24 && iban.StartsWith("SA", StringComparison.OrdinalIgnoreCase)
         && iban[2..].All(char.IsLetterOrDigit);
+
+    private static bool IsValidSaudiMobileNumber(string number)
+    {
+        // Saudi mobile numbers: 05xx xxx xxx (12 digits with country code, 10 without)
+        var cleaned = number.Replace(" ", "").Replace("-", "");
+        if (cleaned.StartsWith("+966")) cleaned = "0" + cleaned[4..];
+        if (cleaned.StartsWith("966")) cleaned = "0" + cleaned[3..];
+        return cleaned.Length == 10 && cleaned.StartsWith("05") && cleaned.All(char.IsDigit);
+    }
 
     private static PayoutAccountDto MapDto(PayoutAccount a) => new(
         a.Id, a.ActorId, a.DestinationType, a.AccountHolderName,

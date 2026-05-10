@@ -94,6 +94,18 @@ public interface IPayoutService
 
     /// <summary>Scheduled SARIE batch processor — processes queued transfers in open window.</summary>
     Task ProcessSarieQueueAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-PAYOUT-01: PSP/gateway webhook — confirms transfer completed.
+    /// Releases balance_hold, sets final status, records PSP reference.
+    /// </summary>
+    Task<PayoutRequestDto> CompletePayoutAsync(Guid payoutId, string pspTransactionId, string transferReference, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-PAYOUT-01 EX2: Retry a failed payout with exponential backoff.
+    /// RetryCount incremented; after 3 failures, hold released and admin notified.
+    /// </summary>
+    Task<PayoutRequestDto> RetryPayoutAsync(Guid payoutId, CancellationToken ct = default);
 }
 
 // ── Instant Pay Service ────────────────────────────────────────────────────────
@@ -117,6 +129,31 @@ public interface IInstantPayService
     Task RevokeInstantPayAsync(Guid walletId, string reasonCode, string estimatedResolution, Guid adminId, CancellationToken ct = default);
 
     Task<IEnumerable<InstantPayCashoutDto>> GetByActorAsync(Guid actorId, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-INSTANT-01: PSP/gateway webhook — confirms Instant Pay transfer completed.
+    /// Releases balance_hold, sets completed status, records PSP reference.
+    /// </summary>
+    Task<InstantPayResultDto> CompleteCashoutAsync(Guid cashoutId, string pspTransactionId, string transferReference, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-INSTANT-01 AF2: Primary rail failed — fallback to standard IBAN transfer (T+1).
+    /// Creates a standard PayoutRequest queued for SARIE processing.
+    /// EX4: If fallback rail also fails, releases hold and marks cashout as Failed.
+    /// </summary>
+    Task<InstantPayCashoutDto> FailCashoutAsync(Guid cashoutId, string failureReason, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-INSTANT-01 EX3: Account flagged during transfer.
+    /// Cancels cashout, releases balance_hold back to balance_available, raises fraud alert.
+    /// </summary>
+    Task<InstantPayCashoutDto> CancelCashoutAsync(Guid cashoutId, string reasonCode, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-INSTANT-01 AF3: Auto-cashout mode — scans wallets with AutoCashoutThreshold
+    /// set and available balance ≥ threshold. Auto-initiates cashout for eligible wallets.
+    /// </summary>
+    Task<int> ProcessAutoCashoutsAsync(CancellationToken ct = default);
 }
 
 // ── Admin / Finance Ops Service ────────────────────────────────────────────────

@@ -38,11 +38,26 @@ public class PaymentCollectionService : IPaymentCollectionService
         // Load admin-configurable VAT rate — never hardcoded
         var vatRate = await _params.GetDecimalAsync("vat_rate", 0.15m, req.CityId, req.ServiceType, ct);
 
-        var commissionAmount = Math.Round(req.GrossAmount * req.CommissionRate, 2);
-        var fleetFeeAmount = Math.Round(req.GrossAmount * req.FleetFeePercent, 2);
+        // AF3: Promo code applied — discount deducted before commission calculation
+        // Promo cost absorbed by platform wallet
+        var promoDiscountPercent = 0m;
+        if (!string.IsNullOrEmpty(req.PromoCode))
+        {
+            // Lookup promo discount rate — admin-configurable per city
+            promoDiscountPercent = await _params.GetDecimalAsync(
+                $"promo_discount_{req.PromoCode}", 0m, req.CityId, req.ServiceType, ct);
+        }
+        var effectiveGross = req.GrossAmount * (1 - promoDiscountPercent);
+        var promoCost = req.GrossAmount - effectiveGross;
+
+        var commissionAmount = Math.Round(effectiveGross * req.CommissionRate, 2);
+        var fleetFeeAmount = Math.Round(effectiveGross * req.FleetFeePercent, 2);
         var vatAmount = Math.Round(commissionAmount * vatRate, 2);
-        var netDriverAmount = req.GrossAmount - commissionAmount - fleetFeeAmount;
+        var netDriverAmount = effectiveGross - commissionAmount - fleetFeeAmount;
         var tipAmount = req.TipAmount;
+
+        // TODO EX1: Gateway authorization failure → retry once. On second failure: notify user, block ride.
+        // TODO EX2: Capture fails post-completion → amount held in escrow; admin notified; manual resolution.
 
         await _uow.BeginTransactionAsync(ct);
         try
@@ -59,10 +74,12 @@ public class PaymentCollectionService : IPaymentCollectionService
                     ?? throw new KeyNotFoundException("User wallet not found.");
                 if (userWallet.FraudScore >= 80) throw new WalletFrozenException();
 
-                DebitUserWalletBuckets(userWallet, req.GrossAmount);
+                // User pays effective gross (after promo discount)
+                DebitUserWalletBuckets(userWallet, effectiveGross);
                 userWallet.UpdatedAt = DateTime.UtcNow;
                 _uow.Wallets.Update(userWallet);
-                deltas.Add(new WalletDeltaDto(userWallet.Id, ActorType.User, -req.GrossAmount, "Payment debit"));
+                deltas.Add(new WalletDeltaDto(userWallet.Id, ActorType.User, -effectiveGross,
+                    promoCost > 0 ? "Payment debit (after promo discount)" : "Payment debit"));
             }
 
             // ── 2. Driver / Delivery wallet credit (PENDING sub-balance) ──────
@@ -104,30 +121,57 @@ public class PaymentCollectionService : IPaymentCollectionService
             {
                 var merchantWallet = await _uow.Wallets.GetByActorAsync(req.MerchantActorId.Value, ActorType.Merchant, ct)
                     ?? throw new KeyNotFoundException("Merchant wallet not found.");
-                var netMerchantAmount = req.GrossAmount - commissionAmount;
+                var netMerchantAmount = effectiveGross - commissionAmount;
                 merchantWallet.BalanceAvailable += netMerchantAmount;
                 merchantWallet.UpdatedAt = DateTime.UtcNow;
                 _uow.Wallets.Update(merchantWallet);
                 deltas.Add(new WalletDeltaDto(merchantWallet.Id, ActorType.Merchant, netMerchantAmount, "Net order credit"));
             }
 
-            // ── 4. Platform wallet credit (commission + fleet fees) ───────────
+            // ── 4. Platform wallet credit (commission + fleet fees − promo cost) ─
             var platformWallet = await _uow.Wallets.GetByActorAsync(Guid.Empty, ActorType.Platform, ct);
             if (platformWallet is not null)
             {
-                platformWallet.BalanceAvailable += commissionAmount + fleetFeeAmount;
+                // Platform receives commission + fees, but absorbs promo cost (discount)
+                var platformAmount = commissionAmount + fleetFeeAmount - promoCost;
+                platformWallet.BalanceAvailable += platformAmount;
                 platformWallet.UpdatedAt = DateTime.UtcNow;
                 _uow.Wallets.Update(platformWallet);
                 deltas.Add(new WalletDeltaDto(platformWallet.Id, ActorType.Platform,
-                    commissionAmount + fleetFeeAmount, "Commission + fleet fee"));
+                    platformAmount, promoCost > 0
+                        ? $"Commission + fees − promo cost ({promoCost:F2} SAR)"
+                        : "Commission + fleet fee"));
             }
 
             // ── 5. Fleet wallet credit (fleet fee, same atomic write) ─────────
-            // Fleet fee recorded as distinct line item per SRS-FIN-001 §Wallets
             if (fleetFeeAmount > 0)
             {
-                // Fleet wallet lookup would go here via fleet affiliation lookup
-                deltas.Add(new WalletDeltaDto(Guid.Empty, ActorType.Fleet, fleetFeeAmount, "Fleet fee credit"));
+                // Look up fleet wallet by driver's city context
+                // TODO: Replace with proper fleet affiliation lookup when fleet management is implemented
+                Wallet? fleetWallet = null;
+                if (driverWallet.CityId.HasValue)
+                {
+                    fleetWallet = (await _uow.Wallets.GetAllAsync(ct))
+                        .FirstOrDefault(w => w.ActorType == ActorType.Fleet && w.CityId == driverWallet.CityId);
+                }
+
+                if (fleetWallet is not null)
+                {
+                    fleetWallet.BalanceAvailable += fleetFeeAmount;
+                    fleetWallet.UpdatedAt = DateTime.UtcNow;
+                    _uow.Wallets.Update(fleetWallet);
+                    deltas.Add(new WalletDeltaDto(fleetWallet.Id, ActorType.Fleet, fleetFeeAmount, "Fleet fee credit"));
+                }
+                else
+                {
+                    // Fallback: credit platform wallet with fleet fee if no fleet wallet found
+                    if (platformWallet is not null)
+                    {
+                        platformWallet.BalanceAvailable += fleetFeeAmount;
+                        _uow.Wallets.Update(platformWallet);
+                    }
+                    deltas.Add(new WalletDeltaDto(Guid.Empty, ActorType.Fleet, fleetFeeAmount, "Fleet fee (no fleet wallet)"));
+                }
             }
 
             // ── 6. Persist transaction ────────────────────────────────────────
@@ -137,7 +181,7 @@ public class PaymentCollectionService : IPaymentCollectionService
                 WalletId = driverWallet.Id,
                 RideId = req.RideId,
                 OrderId = req.OrderId,
-                GrossAmount = req.GrossAmount,
+                GrossAmount = effectiveGross,
                 CommissionAmount = commissionAmount,
                 CommissionRate = req.CommissionRate,
                 VatAmount = vatAmount,
@@ -157,16 +201,20 @@ public class PaymentCollectionService : IPaymentCollectionService
                 AuditEventType.Payment, "PAYMENT_COLLECTED",
                 req.UserActorId, ActorRole.System,
                 txnId, "TRANSACTION", null,
-                JsonSerializer.Serialize(new { txnId, req.GrossAmount, commissionAmount, deltas }),
+                JsonSerializer.Serialize(new
+                {
+                    txnId, req.GrossAmount, effectiveGross, promoCost,
+                    commissionAmount, vatAmount, netDriverAmount, deltas
+                }),
                 req.CityId, null, null), ct);
 
             await _uow.SaveChangesAsync(ct);
             await _uow.CommitAsync(ct);
 
             return new CollectPaymentResultDto(
-                txnId, req.GrossAmount, commissionAmount, vatAmount,
+                txnId, effectiveGross, commissionAmount, vatAmount,
                 tipAmount, fleetFeeAmount, netDriverAmount,
-                req.MerchantActorId.HasValue ? req.GrossAmount - commissionAmount : 0,
+                req.MerchantActorId.HasValue ? effectiveGross - commissionAmount : 0,
                 req.PaymentMethod, invoiceId, deltas, DateTime.UtcNow);
         }
         catch
@@ -179,15 +227,68 @@ public class PaymentCollectionService : IPaymentCollectionService
     public async Task<TipResultDto> AddTipAsync(AddTipRequest req, CancellationToken ct = default)
     {
         // Tip window enforced — duration is admin-configurable (default 2 hours post-ride)
-        // (Ride timestamp validation would be done by caller or via ride service)
+        // TODO: replace hardcoded ride timestamp lookup with actual ride service call
+        // var tipWindowHours = await _params.GetIntAsync("tip_window_hours", 2, null, ct);
+        // var ride = await _rideService.GetRideAsync(req.RideId, ct);
+        // if (DateTime.UtcNow > ride.CompletedAt.AddHours(tipWindowHours))
+        //     throw new InvalidOperationException("Post-ride tip window has expired.");
 
         await _uow.BeginTransactionAsync(ct);
         try
         {
+            // ── 1. Debit source (Wallet or Card) ──────────────────────────────
+            if (req.Source == PaymentMethod.Wallet)
+            {
+                // Debit user wallet via the wallet's credit bucket consumption order
+                var userWallet = await _uow.Wallets.GetByActorAsync(req.UserId, ActorType.User, ct)
+                    ?? throw new KeyNotFoundException("User wallet not found.");
+
+                if (userWallet.FraudScore >= 80) throw new WalletFrozenException();
+
+                var remaining = req.TipAmount;
+
+                // RefundCredit → PromoCredit → CourtesyCredit → BalanceAvailable
+                var refundDebit = Math.Min(remaining, userWallet.BalanceRefundCredit);
+                userWallet.BalanceRefundCredit -= refundDebit;
+                remaining -= refundDebit;
+
+                if (remaining > 0)
+                {
+                    var promoDebit = Math.Min(remaining, userWallet.BalancePromoCredit);
+                    userWallet.BalancePromoCredit -= promoDebit;
+                    remaining -= promoDebit;
+                }
+
+                if (remaining > 0)
+                {
+                    var courtesyDebit = Math.Min(remaining, userWallet.BalanceCourtesyCredit);
+                    userWallet.BalanceCourtesyCredit -= courtesyDebit;
+                    remaining -= courtesyDebit;
+                }
+
+                if (remaining > 0)
+                {
+                    if (userWallet.BalanceAvailable < remaining)
+                        throw new InsufficientBalanceException(userWallet.TotalUserBalance, req.TipAmount);
+                    userWallet.BalanceAvailable -= remaining;
+                }
+
+                userWallet.UpdatedAt = DateTime.UtcNow;
+                _uow.Wallets.Update(userWallet);
+            }
+            else if (req.Source == PaymentMethod.Card)
+            {
+                // TODO EX2: Initiate card payment capture for tip amount via payment gateway
+                // If capture fails → tip not applied; user shown error
+                // For now, card-source tips require a PSP transaction ID for audit
+                if (string.IsNullOrEmpty(req.IdempotencyKey))
+                    throw new InvalidOperationException("Card tip requires an idempotency key for payment gateway reconciliation.");
+            }
+
+            // ── 2. Credit driver — 100% to driver, NOT subject to platform commission ──
             var driverWallet = await _uow.Wallets.GetByActorAsync(req.DriverId, ActorType.Driver, ct)
                 ?? throw new KeyNotFoundException("Driver wallet not found.");
 
-            // 100% to driver — NOT subject to platform commission
             driverWallet.BalanceAvailable += req.TipAmount;
             driverWallet.UpdatedAt = DateTime.UtcNow;
             _uow.Wallets.Update(driverWallet);
@@ -197,7 +298,7 @@ public class PaymentCollectionService : IPaymentCollectionService
                 AuditEventType.Payment, "TIP_ADDED",
                 req.UserId, ActorRole.User,
                 tipId, "TIP", null,
-                JsonSerializer.Serialize(new { tipId, req.RideId, req.TipAmount, req.TipType }),
+                JsonSerializer.Serialize(new { tipId, req.RideId, req.DriverId, req.TipAmount, req.TipType, req.Source }),
                 null, null, null), ct);
 
             await _uow.SaveChangesAsync(ct);

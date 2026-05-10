@@ -16,6 +16,7 @@ public interface IRepository<T> where T : BaseEntity
 public interface IWalletRepository : IRepository<Wallet>
 {
     Task<Wallet?> GetByActorAsync(Guid actorId, ActorType actorType, CancellationToken ct = default);
+    Task<IEnumerable<Wallet>> GetByActorOnlyAsync(Guid actorId, CancellationToken ct = default);
     Task<IEnumerable<Wallet>> GetWalletsInDunningAsync(CancellationToken ct = default);
     Task<IEnumerable<Wallet>> GetByInstantPayTierAsync(InstantPayTier tier, CancellationToken ct = default);
 
@@ -30,6 +31,12 @@ public interface IWalletRepository : IRepository<Wallet>
     /// Used by the background settlement service to auto-settle earnings.
     /// </summary>
     Task<IEnumerable<Wallet>> GetWalletsWithPendingOlderThanAsync(int minutes, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-INSTANT-01 AF3: Returns wallets where AutoCashoutThreshold is set,
+    /// InstantPayEnabled, KYC verified, not TierA, and available >= threshold.
+    /// </summary>
+    Task<IEnumerable<Wallet>> GetWalletsWithAutoCashoutEnabledAsync(CancellationToken ct = default);
 }
 
 public interface ITransactionRepository : IRepository<Transaction>
@@ -54,6 +61,9 @@ public interface IInstantPayRepository : IRepository<InstantPayCashout>
     Task<IEnumerable<InstantPayCashout>> GetByActorAsync(Guid actorId, CancellationToken ct = default);
     Task<int> GetDailyCountAsync(Guid actorId, DateTime localDate, CancellationToken ct = default);
     Task<decimal> GetWeeklyTotalAsync(Guid actorId, DateTime weekStart, CancellationToken ct = default);
+
+    /// <summary>Find the cashout linked to a fallback PayoutRequest.</summary>
+    Task<InstantPayCashout?> GetByPayoutRequestIdAsync(Guid payoutRequestId, CancellationToken ct = default);
 }
 
 public interface IPayoutAccountRepository : IRepository<PayoutAccount>

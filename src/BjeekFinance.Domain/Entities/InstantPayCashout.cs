@@ -40,10 +40,17 @@ public class InstantPayCashout : BaseEntity
     /// <summary>Whether this fell back from Tier 2 to standard payout.</summary>
     public bool IsFallback { get; set; } = false;
 
+    /// <summary>
+    /// Links to the standard PayoutRequest created during AF2 fallback.
+    /// When non-null, CompletePayoutAsync on the linked PayoutRequest releases the hold.
+    /// </summary>
+    public Guid? PayoutRequestId { get; set; }
+
     public Guid? AuditLogEntryId { get; set; }
 
     // ── Navigation ─────────────────────────────────────────────────────────────
     public Wallet Wallet { get; set; } = null!;
+    public PayoutRequest? PayoutRequest { get; set; }
 }
 
 /// <summary>

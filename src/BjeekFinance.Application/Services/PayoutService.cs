@@ -54,8 +54,10 @@ public class PayoutService : IPayoutService
         var feeAmount = await _uow.FinanceParameters.GetDecimalAsync("payout_fee", 0m, req.CityId, null, ct);
         var netTransfer = req.AmountRequested - feeAmount;
 
-        // SARIE window check — Sun–Thu 08:00–16:00 AST (UTC+3)
-        var sarieStatus = CheckSarieWindow(DateTime.UtcNow);
+        // AF2: STC Pay / mobile wallet — near-real-time, no SARIE dependency
+        // IBAN transfers route via SARIE (Sun–Thu 08:00–16:00 AST)
+        var isIBAN = payoutAccount.DestinationType == PayoutDestinationType.SaudiIban;
+        var sarieStatus = isIBAN ? CheckSarieWindow(DateTime.UtcNow) : SarieWindowStatus.Open;
 
         await _uow.BeginTransactionAsync(ct);
         try
@@ -66,7 +68,10 @@ public class PayoutService : IPayoutService
             wallet.UpdatedAt = DateTime.UtcNow;
             _uow.Wallets.Update(wallet);
 
-            // Auto-approve threshold — admin-configurable (default SAR 10,000 → Finance Admin)
+            // Approval routing — three tiers:
+            //   ≤ autoApproveThreshold            → Approved (auto-fire)
+            //   > autoApproveThreshold            → Pending (Finance Admin)
+            //   > superAdminThreshold             → Pending (Super Admin via RBAC)
             var autoApproveThreshold = await _uow.FinanceParameters.GetDecimalAsync("payout_auto_approve_threshold", 10_000m, req.CityId, null, ct);
             var superAdminThreshold = await _uow.FinanceParameters.GetDecimalAsync("payout_super_admin_threshold", 37_000m, req.CityId, null, ct);
 
@@ -85,7 +90,8 @@ public class PayoutService : IPayoutService
                 DestinationType = payoutAccount.DestinationType,
                 Status = status,
                 SarieWindowStatus = sarieStatus,
-                ScheduledAt = sarieStatus == SarieWindowStatus.Queued ? NextSarieWindow(DateTime.UtcNow) : null
+                ScheduledAt = isIBAN && sarieStatus == SarieWindowStatus.Queued
+                    ? NextSarieWindow(DateTime.UtcNow) : null
             };
             await _uow.PayoutRequests.AddAsync(payout, ct);
 
@@ -184,6 +190,130 @@ public class PayoutService : IPayoutService
         var payout = await _uow.PayoutRequests.GetByIdAsync(payoutId, ct)
             ?? throw new KeyNotFoundException($"Payout {payoutId} not found.");
         return MapToDto(payout);
+    }
+
+    public async Task<PayoutRequestDto> CompletePayoutAsync(Guid payoutId, string pspTransactionId, string transferReference, CancellationToken ct = default)
+    {
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var payout = await _uow.PayoutRequests.GetByIdAsync(payoutId, ct)
+                ?? throw new KeyNotFoundException($"Payout {payoutId} not found.");
+            if (payout.Status != PayoutStatus.Processing)
+                throw new InvalidOperationException($"Only processing payouts can be completed. Current status: {payout.Status}.");
+
+            var wallet = await _uow.Wallets.GetByIdWithLockAsync(payout.WalletId, ct)
+                ?? throw new KeyNotFoundException($"Wallet {payout.WalletId} not found.");
+
+            var before = wallet.BalanceHold;
+            // Release hold — balance_available already reduced at initiation
+            wallet.BalanceHold -= payout.AmountRequested;
+            wallet.UpdatedAt = DateTime.UtcNow;
+            _uow.Wallets.Update(wallet);
+
+            payout.Status = PayoutStatus.Completed;
+            payout.PspTransactionId = pspTransactionId;
+            payout.TransferReference = transferReference;
+            payout.UpdatedAt = DateTime.UtcNow;
+            _uow.PayoutRequests.Update(payout);
+
+            // If this PayoutRequest was created as an Instant Pay fallback (AF2),
+            // update the linked cashout to Completed as well.
+            var linkedCashout = await _uow.InstantPay.GetByPayoutRequestIdAsync(payoutId, ct);
+            if (linkedCashout != null)
+            {
+                linkedCashout.TransferStatus = PayoutStatus.Completed;
+                linkedCashout.TransferReference = transferReference;
+                _uow.InstantPay.Update(linkedCashout);
+
+                await _audit.WriteAsync(new AuditLogRequest(
+                    AuditEventType.InstantPay, "INSTANT_PAY_FALLBACK_COMPLETED",
+                    linkedCashout.ActorId, ActorRole.Driver, linkedCashout.Id, "INSTANT_PAY",
+                    null, JsonSerializer.Serialize(new { payoutId, pspTransactionId, transferReference }),
+                    null, null, null), ct);
+            }
+
+            await _audit.WriteAsync(new AuditLogRequest(
+                AuditEventType.Payout, "PAYOUT_COMPLETED",
+                Guid.Empty, ActorRole.System,
+                payoutId, "PAYOUT", null,
+                JsonSerializer.Serialize(new { payoutId, pspTransactionId, transferReference, holdReleased = before }),
+                null, null, null), ct);
+
+            await _uow.SaveChangesAsync(ct);
+            await _uow.CommitAsync(ct);
+            return MapToDto(payout);
+        }
+        catch { await _uow.RollbackAsync(ct); throw; }
+    }
+
+    public async Task<PayoutRequestDto> RetryPayoutAsync(Guid payoutId, CancellationToken ct = default)
+    {
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var payout = await _uow.PayoutRequests.GetByIdAsync(payoutId, ct)
+                ?? throw new KeyNotFoundException($"Payout {payoutId} not found.");
+
+            if (payout.Status != PayoutStatus.Failed)
+                throw new InvalidOperationException($"Only failed payouts can be retried. Current status: {payout.Status}.");
+
+            // EX2: Exponential backoff — 3 max retries
+            if (payout.RetryCount >= 3)
+            {
+                // Release hold back to available after persistent failure
+                var wallet = await _uow.Wallets.GetByIdWithLockAsync(payout.WalletId, ct)!;
+                wallet!.BalanceHold -= payout.AmountRequested;
+                wallet.BalanceAvailable += payout.AmountRequested;
+                wallet.UpdatedAt = DateTime.UtcNow;
+                _uow.Wallets.Update(wallet);
+
+                payout.Status = PayoutStatus.Rejected;
+                payout.RejectionReasonCode = "MAX_RETRIES_EXCEEDED";
+                payout.UpdatedAt = DateTime.UtcNow;
+                _uow.PayoutRequests.Update(payout);
+
+                // If this was an Instant Pay fallback, mark linked cashout as Failed
+                var linkedCashout = await _uow.InstantPay.GetByPayoutRequestIdAsync(payoutId, ct);
+                if (linkedCashout != null)
+                {
+                    linkedCashout.TransferStatus = PayoutStatus.Failed;
+                    _uow.InstantPay.Update(linkedCashout);
+
+                    await _audit.WriteAsync(new AuditLogRequest(
+                        AuditEventType.InstantPay, "INSTANT_PAY_FALLBACK_PERMANENTLY_FAILED",
+                        linkedCashout.ActorId, ActorRole.Driver, linkedCashout.Id, "INSTANT_PAY",
+                        null, JsonSerializer.Serialize(new { payoutId, retryCount = payout.RetryCount }),
+                        null, null, null), ct);
+                }
+
+                await _audit.WriteAsync(new AuditLogRequest(
+                    AuditEventType.Payout, "PAYOUT_FAILED_PERMANENT",
+                    Guid.Empty, ActorRole.System,
+                    payoutId, "PAYOUT", null,
+                    JsonSerializer.Serialize(new { payoutId, retryCount = payout.RetryCount }),
+                    null, null, null), ct);
+            }
+            else
+            {
+                payout.RetryCount++;
+                payout.Status = PayoutStatus.Processing;
+                payout.UpdatedAt = DateTime.UtcNow;
+                _uow.PayoutRequests.Update(payout);
+
+                await _audit.WriteAsync(new AuditLogRequest(
+                    AuditEventType.Payout, "PAYOUT_RETRY",
+                    Guid.Empty, ActorRole.System,
+                    payoutId, "PAYOUT", null,
+                    JsonSerializer.Serialize(new { payoutId, retryCount = payout.RetryCount }),
+                    null, null, null), ct);
+            }
+
+            await _uow.SaveChangesAsync(ct);
+            await _uow.CommitAsync(ct);
+            return MapToDto(payout);
+        }
+        catch { await _uow.RollbackAsync(ct); throw; }
     }
 
     public async Task ProcessSarieQueueAsync(CancellationToken ct = default)
@@ -424,6 +554,210 @@ public class InstantPayService : IInstantPayService
             c.Id, c.ActorId, c.AmountRequested, c.FeeAmount,
             c.NetTransferAmount, c.TransferRail, c.TransferStatus,
             c.IsAutoTriggered, c.IsFallback, c.CreatedAt));
+    }
+
+    // ═══════════════════════════════════════════════════════════════════════════
+    //  UC-FIN-INSTANT-01: PSP webhook / lifecycle
+    // ═══════════════════════════════════════════════════════════════════════════
+
+    public async Task<InstantPayResultDto> CompleteCashoutAsync(Guid cashoutId, string pspTransactionId, string transferReference, CancellationToken ct = default)
+    {
+        var cashout = await _uow.InstantPay.GetByIdAsync(cashoutId, ct)
+            ?? throw new KeyNotFoundException($"Instant Pay cashout {cashoutId} not found.");
+
+        if (cashout.TransferStatus != PayoutStatus.Processing)
+            throw new InvalidOperationException($"Cashout is not in Processing status. Current: {cashout.TransferStatus}.");
+        if (cashout.IsFallback)
+            throw new InvalidOperationException("Cashout is in fallback mode. Use CompletePayoutAsync on the linked PayoutRequest instead.");
+
+        var wallet = await _uow.Wallets.GetByIdWithLockAsync(cashout.WalletId, ct)!;
+
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            var before = wallet!.BalanceHold;
+            wallet.BalanceHold -= cashout.AmountRequested;
+            wallet.UpdatedAt = DateTime.UtcNow;
+            _uow.Wallets.Update(wallet);
+
+            cashout.TransferReference = transferReference;
+            cashout.TransferStatus = PayoutStatus.Completed;
+            _uow.InstantPay.Update(cashout);
+
+            await _audit.WriteAsync(new AuditLogRequest(
+                AuditEventType.InstantPay, "INSTANT_PAY_COMPLETED",
+                cashout.ActorId, ActorRole.Driver, cashout.Id, "INSTANT_PAY",
+                JsonSerializer.Serialize(new { BalanceHold = before }),
+                JsonSerializer.Serialize(new { pspTransactionId, transferReference }),
+                wallet.CityId, null, null), ct);
+
+            await _uow.SaveChangesAsync(ct);
+            await _uow.CommitAsync(ct);
+
+            return new InstantPayResultDto(
+                cashout.Id, cashout.ActorId, cashout.AmountRequested, cashout.FeeAmount,
+                cashout.VatOnFee, cashout.NetTransferAmount, cashout.TransferRail,
+                PayoutStatus.Completed, transferReference, cashout.MicroInvoiceId,
+                cashout.DailyCountAfter, false, DateTime.UtcNow);
+        }
+        catch { await _uow.RollbackAsync(ct); throw; }
+    }
+
+    public async Task<InstantPayCashoutDto> FailCashoutAsync(Guid cashoutId, string failureReason, CancellationToken ct = default)
+    {
+        var cashout = await _uow.InstantPay.GetByIdAsync(cashoutId, ct)
+            ?? throw new KeyNotFoundException($"Instant Pay cashout {cashoutId} not found.");
+
+        if (cashout.TransferStatus != PayoutStatus.Processing)
+            throw new InvalidOperationException($"Cashout is not in Processing status. Current: {cashout.TransferStatus}.");
+
+        var wallet = await _uow.Wallets.GetByIdWithLockAsync(cashout.WalletId, ct)!;
+
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            if (cashout.TransferRail is TransferRail.StcPay or TransferRail.IbanFast)
+            {
+                // ── AF2: Primary rail failed → fallback to standard IBAN (T+1) ──
+                // Hold stays in place (cashout locked it). Fallback PayoutRequest
+                // will release it on completion (via CompletePayoutAsync).
+                var payoutAccount = await _uow.PayoutAccounts.GetVerifiedAsync(cashout.ActorId, ct);
+                var fallbackPayout = new PayoutRequest
+                {
+                    ActorId = cashout.ActorId,
+                    WalletId = cashout.WalletId,
+                    PayoutAccountId = payoutAccount?.Id ?? Guid.Empty,
+                    AmountRequested = cashout.AmountRequested,
+                    FeeAmount = 0m, // fee already collected at Instant Pay initiation
+                    NetTransferAmount = cashout.AmountRequested,
+                    DestinationType = PayoutDestinationType.SaudiIban,
+                    Status = PayoutStatus.Pending,
+                    SarieWindowStatus = SarieWindowStatus.Queued
+                };
+                await _uow.PayoutRequests.AddAsync(fallbackPayout, ct);
+
+                cashout.IsFallback = true;
+                cashout.TransferRail = TransferRail.IbanStandardFallback;
+                cashout.PayoutRequestId = fallbackPayout.Id;
+
+                await _audit.WriteAsync(new AuditLogRequest(
+                    AuditEventType.InstantPay, "INSTANT_PAY_FALLBACK",
+                    cashout.ActorId, ActorRole.Driver, cashout.Id, "INSTANT_PAY",
+                    JsonSerializer.Serialize(new { BalanceHold = wallet!.BalanceHold }),
+                    JsonSerializer.Serialize(new { failureReason, fallbackPayoutId = fallbackPayout.Id }),
+                    wallet.CityId, null, null), ct);
+            }
+            else
+            {
+                // ── EX4: Fallback rail also failed → release hold, mark failed ──
+                wallet!.BalanceHold -= cashout.AmountRequested;
+                wallet.BalanceAvailable += cashout.AmountRequested;
+                wallet.UpdatedAt = DateTime.UtcNow;
+                _uow.Wallets.Update(wallet);
+
+                cashout.TransferStatus = PayoutStatus.Failed;
+
+                await _audit.WriteAsync(new AuditLogRequest(
+                    AuditEventType.InstantPay, "INSTANT_PAY_ALL_RAILS_FAILED",
+                    cashout.ActorId, ActorRole.Driver, cashout.Id, "INSTANT_PAY",
+                    JsonSerializer.Serialize(new { BalanceHold = wallet.BalanceHold }),
+                    JsonSerializer.Serialize(new { failureReason }),
+                    wallet.CityId, null, null), ct);
+            }
+
+            _uow.InstantPay.Update(cashout);
+            await _uow.SaveChangesAsync(ct);
+            await _uow.CommitAsync(ct);
+
+            return new InstantPayCashoutDto(
+                cashout.Id, cashout.ActorId, cashout.AmountRequested, cashout.FeeAmount,
+                cashout.NetTransferAmount, cashout.TransferRail, cashout.TransferStatus,
+                cashout.IsAutoTriggered, cashout.IsFallback, cashout.CreatedAt);
+        }
+        catch { await _uow.RollbackAsync(ct); throw; }
+    }
+
+    public async Task<InstantPayCashoutDto> CancelCashoutAsync(Guid cashoutId, string reasonCode, CancellationToken ct = default)
+    {
+        var cashout = await _uow.InstantPay.GetByIdAsync(cashoutId, ct)
+            ?? throw new KeyNotFoundException($"Instant Pay cashout {cashoutId} not found.");
+
+        if (cashout.TransferStatus != PayoutStatus.Processing)
+            throw new InvalidOperationException($"Cashout is not in Processing status. Current: {cashout.TransferStatus}.");
+
+        var wallet = await _uow.Wallets.GetByIdWithLockAsync(cashout.WalletId, ct)!;
+
+        await _uow.BeginTransactionAsync(ct);
+        try
+        {
+            // EX3: Release hold back to available, reverse daily count increment
+            wallet!.BalanceHold -= cashout.AmountRequested;
+            wallet.BalanceAvailable += cashout.AmountRequested;
+            wallet.InstantPayDailyCount--;
+            wallet.UpdatedAt = DateTime.UtcNow;
+            _uow.Wallets.Update(wallet);
+
+            cashout.TransferStatus = PayoutStatus.Failed;
+
+            await _audit.WriteAsync(new AuditLogRequest(
+                AuditEventType.InstantPay, "INSTANT_PAY_CANCELLED_FRAUD",
+                cashout.ActorId, ActorRole.Driver, cashout.Id, "INSTANT_PAY",
+                JsonSerializer.Serialize(new { BalanceHold = wallet.BalanceHold + cashout.AmountRequested }),
+                JsonSerializer.Serialize(new { reasonCode }),
+                wallet.CityId, null, null), ct);
+
+            // TODO: Raise fraud alert via IFraudService when available
+
+            _uow.InstantPay.Update(cashout);
+            await _uow.SaveChangesAsync(ct);
+            await _uow.CommitAsync(ct);
+
+            return new InstantPayCashoutDto(
+                cashout.Id, cashout.ActorId, cashout.AmountRequested, cashout.FeeAmount,
+                cashout.NetTransferAmount, cashout.TransferRail, cashout.TransferStatus,
+                cashout.IsAutoTriggered, cashout.IsFallback, cashout.CreatedAt);
+        }
+        catch { await _uow.RollbackAsync(ct); throw; }
+    }
+
+    public async Task<int> ProcessAutoCashoutsAsync(CancellationToken ct = default)
+    {
+        var wallets = await _uow.Wallets.GetWalletsWithAutoCashoutEnabledAsync(ct);
+        int processed = 0;
+
+        foreach (var wallet in wallets)
+        {
+            var payoutAccount = await _uow.PayoutAccounts.GetVerifiedAsync(wallet.ActorId, ct);
+            if (payoutAccount == null) continue;
+
+            // Build auto-cashout request using the driver's threshold
+            var amount = Math.Min(wallet.BalanceAvailable, wallet.AutoCashoutThreshold!.Value);
+            var req = new InstantPayRequest(
+                wallet.ActorId, wallet.Id, amount, payoutAccount.Id, IsAutoTriggered: true);
+
+            try
+            {
+                await InitiateCashoutAsync(req, ct);
+                processed++;
+
+                // TODO: Send notification via INotificationService when available:
+                // "SAR [amount] has been auto-cashed out to your account."
+            }
+            catch
+            {
+                // Individual wallet failure should not block other auto-cashouts
+                await _audit.WriteAsync(new AuditLogRequest(
+                    AuditEventType.InstantPay, "INSTANT_PAY_AUTO_FAILED",
+                    wallet.ActorId, ActorRole.Driver, wallet.Id, "WALLET",
+                    null, JsonSerializer.Serialize(new { wallet.BalanceAvailable, wallet.AutoCashoutThreshold }),
+                    wallet.CityId, null, null), ct);
+            }
+        }
+
+        if (processed > 0)
+            await _uow.SaveChangesAsync(ct);
+
+        return processed;
     }
 
     // ── Helpers ────────────────────────────────────────────────────────────────
