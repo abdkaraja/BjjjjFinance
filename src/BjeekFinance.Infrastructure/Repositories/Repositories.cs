@@ -374,6 +374,61 @@ public class RefundRepository : Repository<Refund>, IRefundRepository
     public async Task<decimal> GetTotalRefundedAmountAsync(Guid originalTransactionId, CancellationToken ct = default)
         => await _set.Where(r => r.OriginalTransactionId == originalTransactionId && r.Status == RefundStatus.Completed)
             .SumAsync(r => r.Amount, ct);
+
+    public async Task<IEnumerable<Refund>> GetPendingApprovalQueueAsync(CancellationToken ct = default)
+        => await _set.Where(r => r.Status == RefundStatus.AwaitingApproval)
+            .OrderBy(r => r.ApprovalTier)
+            .ThenBy(r => r.CreatedAt)
+            .ToListAsync(ct);
+
+    public async Task<IEnumerable<Refund>> GetByAssignedApproverAsync(Guid approverActorId, CancellationToken ct = default)
+        => await _set.Where(r => r.AssignedApproverActorId == approverActorId)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync(ct);
+
+    public async Task<IEnumerable<Refund>> GetByStatusAsync(RefundStatus status, CancellationToken ct = default)
+        => await _set.Where(r => r.Status == status)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync(ct);
+
+    public async Task<IEnumerable<Refund>> GetDueSlaRemindersAsync(CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        return await _set.Where(r =>
+            r.Status == RefundStatus.AwaitingApproval &&
+            r.SlaAssignedAt != null &&
+            r.SlaReminderSentAt == null &&
+            r.SlaPausedAt == null &&
+            r.SlaTargetHours > 0 &&
+            EF.Functions.DateDiffSecond(r.SlaAssignedAt, now) >= r.SlaTargetHours * 3600 * 0.75)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<Refund>> GetSlaBreachedNotEscalatedAsync(CancellationToken ct = default)
+    {
+        var now = DateTime.UtcNow;
+        return await _set.Where(r =>
+            r.Status == RefundStatus.AwaitingApproval &&
+            r.SlaAssignedAt != null &&
+            r.SlaBreachedAt == null &&
+            r.EscalatedFromActorId == null &&
+            r.SlaPausedAt == null &&
+            r.SlaTargetHours > 0 &&
+            EF.Functions.DateDiffSecond(r.SlaAssignedAt, now) >= r.SlaTargetHours * 3600)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IEnumerable<Refund>> GetPendingByTierAsync(ApprovalTier tier, CancellationToken ct = default)
+        => await _set.Where(r => r.Status == RefundStatus.AwaitingApproval && r.ApprovalTier == tier)
+            .OrderBy(r => r.CreatedAt)
+            .ToListAsync(ct);
+
+    public async Task<Refund?> GetByIdWithIncludesAsync(Guid refundId, CancellationToken ct = default)
+        => await _set
+            .Include(r => r.OriginalTransaction)
+            .Include(r => r.Wallet)
+            .Include(r => r.UserWallet)
+            .FirstOrDefaultAsync(r => r.Id == refundId, ct);
 }
 
 // ── Bulk Reconciliation Report Repository ───────────────────────────────────────

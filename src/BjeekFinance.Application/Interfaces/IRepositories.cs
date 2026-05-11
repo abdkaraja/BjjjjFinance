@@ -119,6 +119,29 @@ public interface IRefundRepository : IRepository<Refund>
 
     /// <summary>Sum of all refund amounts for a transaction (for cumulative cap enforcement).</summary>
     Task<decimal> GetTotalRefundedAmountAsync(Guid originalTransactionId, CancellationToken ct = default);
+
+    // ── UC-FIN-REFUND-ENGINE-01 ────────────────────────────────────────────────
+
+    /// <summary>Get refunds awaiting approval, ordered by tier priority then oldest first.</summary>
+    Task<IEnumerable<Refund>> GetPendingApprovalQueueAsync(CancellationToken ct = default);
+
+    /// <summary>Get refunds assigned to a specific approver.</summary>
+    Task<IEnumerable<Refund>> GetByAssignedApproverAsync(Guid approverActorId, CancellationToken ct = default);
+
+    /// <summary>Get refunds by status.</summary>
+    Task<IEnumerable<Refund>> GetByStatusAsync(RefundStatus status, CancellationToken ct = default);
+
+    /// <summary>Get refunds where SLA reminder is due (75% of target elapsed, no reminder sent yet).</summary>
+    Task<IEnumerable<Refund>> GetDueSlaRemindersAsync(CancellationToken ct = default);
+
+    /// <summary>Get refunds where SLA has breached (100% elapsed, not yet escalated).</summary>
+    Task<IEnumerable<Refund>> GetSlaBreachedNotEscalatedAsync(CancellationToken ct = default);
+
+    /// <summary>Get pending queue for a specific approval tier.</summary>
+    Task<IEnumerable<Refund>> GetPendingByTierAsync(ApprovalTier tier, CancellationToken ct = default);
+
+    /// <summary>Get refund with full navigation includes for review.</summary>
+    Task<Refund?> GetByIdWithIncludesAsync(Guid refundId, CancellationToken ct = default);
 }
 
 public interface IFraudRuleRepository : IRepository<FraudRule>

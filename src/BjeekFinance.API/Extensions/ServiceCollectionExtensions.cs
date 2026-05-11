@@ -30,8 +30,13 @@ public static class ServiceCollectionExtensions
         services.AddScoped<IVatReportService, VatReportService>();
         services.AddScoped<IFraudDetectionService, FraudDetectionService>();
 
-        // Background service: auto-settles pending earnings after 15-minute window
+        // UC-FIN-REFUND-ENGINE-01: Refund auto-approval & AI recommendation
+        services.AddScoped<IRefundAutoApprovalEngine, RefundAutoApprovalEngine>();
+        services.AddScoped<IRefundAiRecommendationService, RefundAiRecommendationService>();
+
+        // Background services
         services.AddHostedService<PendingEarningsSettlementService>();
+        services.AddHostedService<RefundSlaBackgroundService>();
         return services;
     }
 
@@ -76,6 +81,7 @@ public static class ServiceCollectionExtensions
         {
             options.AddPolicy("FinanceAdmin",      p => p.RequireRole("FinanceAdmin", "SuperAdmin"));
             options.AddPolicy("FinanceManager",    p => p.RequireRole("FinanceManager", "VpFinance", "Cfo", "SuperAdmin"));
+            options.AddPolicy("FinanceOfficer",    p => p.RequireRole("FinanceOfficer", "FinanceManager", "VpFinance", "Cfo", "SuperAdmin"));
             options.AddPolicy("VpFinance",         p => p.RequireRole("VpFinance", "Cfo", "SuperAdmin"));
             options.AddPolicy("SuperAdmin",        p => p.RequireRole("SuperAdmin"));
             options.AddPolicy("SupportAgent",      p => p.RequireRole("SupportAgent", "FinanceAdmin", "SuperAdmin"));

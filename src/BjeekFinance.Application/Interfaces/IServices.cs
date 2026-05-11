@@ -256,18 +256,22 @@ public interface ICorporateBillingService
     Task<IEnumerable<CorporateAccountDto>> GetAccountsBelowAlertThresholdAsync(CancellationToken ct = default);
 }
 
-// ── Refund Service (UC-FIN-REFUND-01) ──────────────────────────────────────────
+// ── Refund Service (UC-FIN-REFUND-ENGINE-01) ─────────────────────────────────────
 
 public interface IRefundService
 {
     /// <summary>
-    /// UC-FIN-REFUND-01: Initiate full refund.
-    /// Validates refund window, calculates commission reversal, routes refund
-    /// via original payment method (Card → gateway reversal, Wallet → instant credit).
-    /// Driver/merchant wallet debited for net; platform adjusted for commission reversal.
-    /// All wallet updates atomic via Saga pattern.
+    /// UC-FIN-REFUND-ENGINE-01 Step 1: Submit a refund request by Support Agent.
+    /// Runs pre-flight checks, auto-approval rule engine, and routes to
+    /// the correct approval tier if manual review is required.
     /// </summary>
-    Task<RefundDto> InitiateRefundAsync(InitiateRefundRequest request, CancellationToken ct = default);
+    Task<RefundDto> SubmitRefundRequestAsync(InitiateRefundRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01 Step 2: Get pre-filled refund form data
+    /// (trip/order details, fare amount, previous refunds, available-for-refund balance).
+    /// </summary>
+    Task<RefundRequestPreFillDto> GetRefundPreFillAsync(Guid transactionId, CancellationToken ct = default);
 
     /// <summary>Get refund by ID.</summary>
     Task<RefundDto> GetRefundAsync(Guid refundId, CancellationToken ct = default);
@@ -277,6 +281,61 @@ public interface IRefundService
 
     /// <summary>Get all refunds initiated by an actor.</summary>
     Task<IEnumerable<RefundDto>> GetRefundsByActorAsync(Guid actorId, CancellationToken ct = default);
+
+    /// <summary>Get refunds by status.</summary>
+    Task<IEnumerable<RefundDto>> GetRefundsByStatusAsync(RefundStatus status, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01: Get pending approval queue for approver dashboard.
+    /// </summary>
+    Task<IEnumerable<RefundApprovalQueueItemDto>> GetPendingApprovalQueueAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01: Get detailed refund review with customer profile,
+    /// driver summary, and AI recommendation for the approver modal.
+    /// </summary>
+    Task<RefundReviewDto> GetRefundReviewAsync(Guid refundId, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01 Step 8a: Approve a refund (at requested or adjusted amount).
+    /// Executes wallet credit / card reversal, notifies customer, logs audit trail.
+    /// </summary>
+    Task<RefundDto> ApproveRefundAsync(Guid refundId, ApproveRefundRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01 Step 8b: Deny a refund with reason code.
+    /// Notifies customer, closes request, logs audit trail.
+    /// </summary>
+    Task<RefundDto> DenyRefundAsync(Guid refundId, DenyRefundRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01 AF3: Approver requests more info.
+    /// Returns request to initiating agent. SLA paused until agent responds.
+    /// </summary>
+    Task<RefundDto> RequestMoreInfoAsync(Guid refundId, RequestMoreInfoRefundRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01 AF3: Agent responds to more info request.
+    /// SLA resumes. Request re-enters the approval queue.
+    /// </summary>
+    Task<RefundDto> RespondToMoreInfoAsync(Guid refundId, RespondMoreInfoRefundRequest request, CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01 AF5: Auto-escalate SLA-breached refunds.
+    /// Called by background service or manually.
+    /// </summary>
+    Task<IEnumerable<RefundDto>> ProcessSlaEscalationsAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01 AF4: Send SLA reminders for approaching breaches.
+    /// Called by background service.
+    /// </summary>
+    Task<IEnumerable<RefundDto>> ProcessSlaRemindersAsync(CancellationToken ct = default);
+
+    /// <summary>
+    /// UC-FIN-REFUND-ENGINE-01 EX1: Retry failed wallet credit for a processing refund.
+    /// </summary>
+    Task<RefundDto> RetryWalletCreditAsync(Guid refundId, CancellationToken ct = default);
 }
 
 // ── Cash Settlement Service (UC-FIN-CASH-01) ────────────────────────────────────

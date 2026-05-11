@@ -1,3 +1,5 @@
+using BjeekFinance.Domain.Enums;
+
 namespace BjeekFinance.Domain.Exceptions;
 
 public abstract class DomainException : Exception
@@ -88,4 +90,58 @@ public class IdempotencyConflictException : DomainException
 {
     public IdempotencyConflictException(string key)
         : base("IDEMPOTENCY_CONFLICT", $"A transaction with idempotency key '{key}' has already been processed.") { }
+}
+
+// ── UC-FIN-REFUND-ENGINE-01 Exceptions ──────────────────────────────────────────
+
+public class RefundPreFlightFailedException : DomainException
+{
+    public RefundPreFlightFailedException(string detail)
+        : base("REFUND_PRE_FLIGHT_FAILED", $"Pre-flight check failed: {detail}") { }
+}
+
+public class RefundAmountExceedsAvailableException : DomainException
+{
+    public RefundAmountExceedsAvailableException(decimal requested, decimal available)
+        : base("REFUND_AMOUNT_EXCEEDS_AVAILABLE",
+            $"Refund amount ({requested:F2} SAR) exceeds available-for-refund balance ({available:F2} SAR).") { }
+}
+
+public class RefundAgentAuthorityExceededException : DomainException
+{
+    public RefundAgentAuthorityExceededException(decimal agentLimit)
+        : base("REFUND_AGENT_AUTHORITY_EXCEEDED",
+            $"Refund amount exceeds your request authority of {agentLimit:F2} SAR. Please route to a Finance Officer.") { }
+}
+
+public class RefundFraudScoreBlockedException : DomainException
+{
+    public RefundFraudScoreBlockedException(int fraudScore)
+        : base("REFUND_FRAUD_SCORE_BLOCKED",
+            $"Customer fraud score ({fraudScore}) exceeds the auto-approval threshold. Manual review required.") { }
+}
+
+public class RefundSlaBreachException : DomainException
+{
+    public RefundSlaBreachException(Guid refundId, ApprovalTier currentTier, ApprovalTier escalatedTo)
+        : base("REFUND_SLA_BREACH",
+            $"Refund {refundId} SLA breached at tier {currentTier}. Auto-escalated to {escalatedTo}.") { }
+}
+
+public class RefundAlreadyCompletedException : DomainException
+{
+    public RefundAlreadyCompletedException(Guid refundId)
+        : base("REFUND_ALREADY_COMPLETED", $"Refund {refundId} has already been completed.") { }
+}
+
+public class RefundWalletCreditFailedException : DomainException
+{
+    public RefundWalletCreditFailedException(Guid refundId, string detail)
+        : base("REFUND_WALLET_CREDIT_FAILED", $"Wallet credit for refund {refundId} failed: {detail}") { }
+}
+
+public class RefundCardReversalFailedException : DomainException
+{
+    public RefundCardReversalFailedException(Guid refundId, string detail)
+        : base("REFUND_CARD_REVERSAL_FAILED", $"Card reversal for refund {refundId} failed at gateway: {detail}") { }
 }

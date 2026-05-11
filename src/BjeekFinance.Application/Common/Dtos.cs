@@ -493,17 +493,31 @@ public record CashSettlementDto(
     DateTime CreatedAt
 );
 
-// ── Refund DTOs (UC-FIN-REFUND-01) ──────────────────────────────────────────────
+// ── Refund DTOs (UC-FIN-REFUND-ENGINE-01) ─────────────────────────────────────────
 
 public record InitiateRefundRequest(
     Guid OriginalTransactionId,
     Guid ActorId,
     ActorRole ActorRole,
     string ReasonCode,
+    RefundCategory RefundCategory,
+    string Justification,
+    string? EvidenceUrls,
+    Guid InitiatedBySupportAgentId,
+    Guid UserActorId,
     string RefundType = "FULL",
     decimal? PartialAmount = null,
-    string? ItemsRefunded = null,
-    Guid? UserActorId = null
+    string? ItemsRefunded = null
+);
+
+public record RefundRequestPreFillDto(
+    Guid TransactionId,
+    decimal GrossAmount,
+    decimal TotalRefundedSoFar,
+    decimal AvailableForRefund,
+    string ServiceType,
+    DateTime TransactionDate,
+    PaymentMethod PaymentMethod
 );
 
 public record RefundDto(
@@ -513,6 +527,22 @@ public record RefundDto(
     decimal Amount,
     decimal? PartialAmount,
     string? ItemsRefunded,
+    RefundCategory RefundCategory,
+    string Justification,
+    string? EvidenceUrls,
+    Guid InitiatedBySupportAgentId,
+    Guid UserActorId,
+    CustomerVipTier CustomerVipTier,
+    int FraudScoreAtRequest,
+    decimal AvailableForRefundBalance,
+    bool IsAutoApproved,
+    ApprovalTier? ApprovalTier,
+    Guid? AssignedApproverActorId,
+    DateTime? AssignedAt,
+    string? AiRecommendationJson,
+    string? FinalDecision,
+    decimal? ApprovedAdjustedAmount,
+    string? ApproverNotes,
     decimal CommissionReversalAmount,
     decimal VatReversalAmount,
     string ReasonCode,
@@ -521,8 +551,109 @@ public record RefundDto(
     Guid ActorId,
     ActorRole ActorRole,
     string? PspReversalReference,
+    Guid InitiatedByActorId,
+    decimal? CustomerWalletDelta,
+    bool WarningSentToDriver,
+    string? RequestMoreInfoNotes,
+    DateTime? RequestMoreInfoRequestedAt,
+    DateTime? RequestMoreInfoRespondedAt,
+    int SlaTargetHours,
+    DateTime? SlaAssignedAt,
+    DateTime? SlaReminderSentAt,
+    DateTime? SlaBreachedAt,
+    DateTime? SlaPausedAt,
+    DateTime? SlaResumedAt,
+    Guid? EscalatedFromActorId,
+    ApprovalTier? EscalatedFromTier,
+    string? SupportTicketId,
+    int RetryCount,
     DateTime CreatedAt,
     DateTime? CompletedAt
+);
+
+/// <summary>UC-FIN-REFUND-ENGINE-01: Queue item for approver dashboard.</summary>
+public record RefundApprovalQueueItemDto(
+    Guid RefundId,
+    decimal Amount,
+    RefundCategory Category,
+    CustomerVipTier VipTier,
+    int FraudScore,
+    string JustificationPreview,
+    DateTime CreatedAt,
+    int AgeInHours,
+    ApprovalTier Tier,
+    Guid? AssignedApproverActorId,
+    DateTime? SlaBreachedAt
+);
+
+/// <summary>UC-FIN-REFUND-ENGINE-01: Detailed refund review for approver modal.</summary>
+public record RefundReviewDto(
+    Guid RefundId,
+    decimal Amount,
+    decimal? ApprovedAdjustedAmount,
+    RefundCategory Category,
+    string Justification,
+    string? EvidenceUrls,
+    RefundStatus Status,
+    ApprovalTier? Tier,
+    DateTime CreatedAt,
+    // Customer profile (right panel)
+    CustomerVipTier VipTier,
+    decimal LifetimeSpend,
+    int RefundCountLast12Months,
+    decimal RefundRatePercent,
+    int FraudScore,
+    // AI Recommendation (advisory)
+    string? AiRecommendationJson,
+    // Driver profile summary
+    string? DriverName,
+    decimal DriverRating,
+    // Request details (left panel)
+    decimal OriginalFare,
+    string ServiceType,
+    PaymentMethod OriginalPaymentMethod,
+    DateTime TransactionDate,
+    decimal TotalRefundedSoFar,
+    decimal AvailableForRefund,
+    string InitiatedByAgentName,
+    DateTime InitiatedAt,
+    int AgeInHours,
+    // SLA info
+    int SlaTargetHours,
+    DateTime? SlaAssignedAt,
+    DateTime? SlaReminderSentAt,
+    DateTime? SlaBreachedAt
+);
+
+/// <summary>UC-FIN-REFUND-ENGINE-01: Approver decision payload.</summary>
+public record ApproveRefundRequest(
+    Guid ApproverActorId,
+    ActorRole ApproverRole,
+    decimal? AdjustedAmount = null,
+    bool WarnDriver = false,
+    string? Notes = null
+);
+
+/// <summary>UC-FIN-REFUND-ENGINE-01: Deny refund payload.</summary>
+public record DenyRefundRequest(
+    Guid ApproverActorId,
+    ActorRole ApproverRole,
+    string RejectionReasonCode,
+    string? Notes = null
+);
+
+/// <summary>UC-FIN-REFUND-ENGINE-01: Request more info payload.</summary>
+public record RequestMoreInfoRefundRequest(
+    Guid ApproverActorId,
+    ActorRole ApproverRole,
+    string Notes
+);
+
+/// <summary>UC-FIN-REFUND-ENGINE-01: Agent responds to more info request.</summary>
+public record RespondMoreInfoRefundRequest(
+    Guid SupportAgentActorId,
+    ActorRole SupportAgentRole,
+    string AdditionalInfo
 );
 
 // ── UC-AD-FIN-02: Payout Review & Approval ──────────────────────────────────────

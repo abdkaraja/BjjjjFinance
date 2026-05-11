@@ -131,8 +131,36 @@ public enum RefundStatus
     AwaitingApproval,
     Approved,
     Rejected,
+    RequestMoreInfo,
     Processing,
     Completed
+}
+
+public enum RefundCategory
+{
+    RouteDeviation,
+    ServiceQuality,
+    FareError,
+    CancellationFee,
+    TechnicalIssue,
+    SafetyConcern,
+    Other
+}
+
+public enum CustomerVipTier
+{
+    Standard,
+    Silver,
+    Gold,
+    Platinum
+}
+
+public enum ApprovalTier
+{
+    FinanceOfficer,
+    FinanceManager,
+    VpFinance,
+    Cfo
 }
 
 public enum TipType
